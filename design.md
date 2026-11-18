@@ -4259,32 +4259,3 @@ These should be decided early.
 | Bootstrap trust model             | Self-hosting and formal verification    |
 
 These are architectural decisions, not minor details to postpone until implementation.
-
-# **44. My recommendation for your actual project**
-
-I would maintain three repositories of authoritative documents, even if they initially live in one repository.
-
-**A. Language specification**
-
-The normative definition of the language. It must not depend on the compiler's current implementation choices.
-
-**B. Compiler architecture specification**
-
-The frontend, borrow checker, IRs, optimization passes, backend, runtime interfaces, and implementation invariants.
-
-**C. Verification and validation specification**
-
-The mathematical semantics, proof obligations, conformance tests, IR verifiers, fuzzing strategy, and end-to-end correctness requirements.
-
-Keep implementation decisions out of the language specification unless they are observable language guarantees.
-
-For example, the language can guarantee a particular layout under `repr(C)` without prescribing how the optimizer internally represents a non-address-observable aggregate.
-
-That separation will prevent compiler implementation changes from accidentally becoming language compatibility changes.
-
-**One last thing:** Don't write one enormous document and call it the specification. Give every subsystem its own document, exact definitions, dependencies, invariants, and verification requirements. Maintain a traceability index linking each language rule to its frontend implementation, IR representation, backend behavior, and tests.
-
-That is how you avoid ending up with a 20,000-line document in which one paragraph contradicts something buried 8,000 lines earlier. Humans have a gift for producing exactly that.
-
-Your architecture is ambitious, but the biggest advantage you can give it now is discipline: **no undefined semantics, no undocumented transformations, and no compiler pass that gets to assume something it hasn't been proven or established.**
-
