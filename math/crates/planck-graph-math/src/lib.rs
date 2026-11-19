@@ -104,6 +104,13 @@ pub enum BufferKind {
 }
 
 /// Complete error set for every public function (CEP:FAILURE lists every variant).
+///
+/// CEP:WHAT: Complete error set for every public function of this crate.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: complete enum, every variant reachable: NodeCountExceedsLimit (node_count > L13), InvalidNodeReference (edge target or entry >= node_count), MalformedStarts (CSR starts length/order/zero), EntryOutOfRange (rooted-function entry or RPO not headed by entry), CycleDetected (Kahn on a cyclic graph, G17), BufferTooSmall(BufferKind) (every BufferKind reachable).
+/// CEP:ASSUMES: variants are derived exactly from the pinned SPEC-INDEX §5.7 algorithms' failure conditions; no other failure mode exists.
+/// CEP:COST: data type; cost carried by the functions over it.
+/// CEP:EVIDENCE: EXH exh_buffer_and_input_errors (each variant) + every enumerated graph validates cleanly.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GraphError {
     /// `node_count > MAX_NODES` (Volume 12 row L13).
@@ -111,12 +118,15 @@ pub enum GraphError {
     /// An edge target or the entry names a node `>= node_count`.
     InvalidNodeReference,
     /// `starts.len() != node_count + 1`, `starts[0] != 0`, or `starts` is not
+    /// non-decreasing (malformed CSR).
     MalformedStarts,
     /// `entry >= node_count` passed to a rooted function.
     EntryOutOfRange,
     /// Kahn's algorithm on a cyclic graph: failure on cycle is an error, never a
+    /// partial order (SPEC-INDEX §5.7, G17).
     CycleDetected,
     /// A caller buffer is smaller than the documented capacity requirement;
+    /// `BufferKind` names the buffer.
     BufferTooSmall(BufferKind),
 }
 
