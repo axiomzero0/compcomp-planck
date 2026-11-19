@@ -225,11 +225,21 @@ pub const BRANCH_IMM_AT: u8 = 0;
 // Core types.
 // ---------------------------------------------------------------------------
 
-/// Symbol identifier (pinned §5.9 entry shape).
+/// CEP:WHAT: Symbol identifier (pinned §5.9 entry shape).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (newtype).
+/// CEP:ASSUMES: pinned §5.9 entry shape (offset, kind, symbol, addend).
+/// CEP:COST: 4 bytes (Copy).
+/// CEP:EVIDENCE: crate-level EXH suite.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SymId(pub u32);
 
-/// Explicit per-target byte order; no host-endian assumptions (pinned §5.9, Law 7).
+/// CEP:WHAT: Explicit per-target byte order; no host-endian assumptions (pinned §5.9, Law 7): Little = least-significant byte first, Big = most-significant byte first.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (closed two-variant enum).
+/// CEP:ASSUMES: explicit parameter on every read/write path; never inferred from the host.
+/// CEP:COST: 1 byte discriminant.
+/// CEP:EVIDENCE: the lattice test exercises both variants on every kind.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Endianness {
     /// Least-significant byte first.
@@ -238,7 +248,12 @@ pub enum Endianness {
     Big,
 }
 
-/// The seven pinned relocation kinds (pinned §5.9 "Kinds (initial set, exact)").
+/// CEP:WHAT: The seven pinned relocation kinds (pinned §5.9 "Kinds (initial set, exact)"): Abs64, Abs32, PcRel32, PcRel16, ArmAdrp, ArmBranch26, X86RipRel32.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (closed seven-variant enum).
+/// CEP:ASSUMES: kind set exactly per §5.9; bit() assigns the stable check_kind_allowed bitmask index in pinned order.
+/// CEP:COST: 1 byte discriminant.
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (all 7 kinds).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RelocKind {
     /// Absolute 64-bit: value = S + A, checked u64 add (R1).
@@ -258,7 +273,14 @@ pub enum RelocKind {
 }
 
 impl RelocKind {
-    /// Bit index of this kind in the `check_kind_allowed` bitmask (stable order
+    /// Bit index of this kind in the `check_kind_allowed` bitmask (stable order = the pinned §5.9 kind order).
+    ///
+    /// CEP:WHAT: Stable bit index of the kind in the allowed-mask (pinned §5.9 order).
+    /// CEP:STATUS: complete
+    /// CEP:FAILURE: none (total over the 7 kinds).
+    /// CEP:ASSUMES: bit 0 = Abs64 ... bit 6 = X86RipRel32, the pinned kind order.
+    /// CEP:COST: O(1).
+    /// CEP:EVIDENCE: EXH exh_error_variants_reachable (positive path).
     pub fn bit(self) -> u8 {
         match self {
             RelocKind::Abs64 => 0,
@@ -272,7 +294,12 @@ impl RelocKind {
     }
 }
 
-/// One relocation (pinned §5.9 entry shape).
+/// CEP:WHAT: One relocation (pinned §5.9 entry shape): offset u64, kind RelocKind, symbol SymId, addend i64.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (data record); field constraints enforced by `patch` per its CEP:FAILURE.
+/// CEP:ASSUMES: the pinned §5.9 entry shape.
+/// CEP:COST: 24 bytes (Copy).
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RelocEntry {
     /// Byte offset of the patched field inside the section buffer.
@@ -285,12 +312,18 @@ pub struct RelocEntry {
     pub addend: i64,
 }
 
-/// The computed value of one relocation, tagged by encoding shape.
+/// CEP:WHAT: The computed value of one relocation, tagged by encoding shape: U64 (Abs64 verbatim), I64 (two's-complement field encodings), AdrpImm (delta/4096), BranchImm ((S+A-P)/4).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (closed four-variant data enum).
+/// CEP:ASSUMES: tags mirror the pinned encoding shapes of R1/R3.
+/// CEP:COST: 16 bytes (Copy).
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (round-trips).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PatchValue {
     /// Unsigned 64-bit value written verbatim (Abs64).
     U64(u64),
     /// Signed value encoded two's-complement into the field
+    /// (Abs32, PcRel32, PcRel16, X86RipRel32).
     I64(i64),
     /// ADRP page-delta immediate: delta/4096 in [−2^20, 2^20 − 1] (R3).
     AdrpImm(i32),
@@ -299,11 +332,18 @@ pub enum PatchValue {
 }
 
 /// Complete error enum, exactly Volume 17 R8 (CEP:FAILURE lists every variant).
+///
+/// CEP:WHAT: Complete error enum of the pinned relocation math, exactly Volume 17 R8.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: complete enum (Volume 17 R8), every variant reachable: FieldOutOfRange, PageDeltaUnaligned (defensive, provably unreachable from patch inputs, kept per R8), BranchRangeExceeded, AdrpRangeExceeded, SymbolUndefined, InvalidOffset, UnsupportedKind, PatchOverflow.
+/// CEP:ASSUMES: variant set and meanings exactly Volume 17 R8.
+/// CEP:COST: 1 byte discriminant.
+/// CEP:EVIDENCE: EXH exh_error_variants_reachable (all 8 reachable).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RelocError {
     /// Patched value outside the field's signed/unsigned range (R8).
     FieldOutOfRange,
-    /// ArmAdrp delta not 4 KiB aligned (R8; by construction unreachable —
+    /// ArmAdrp delta not 4 KiB aligned (R8; by construction unreachable — both pages are 4 KiB multiples — kept as the pinned defensive check).
     PageDeltaUnaligned,
     /// ArmBranch26 out of ±128 MiB or misaligned (R8).
     BranchRangeExceeded,
@@ -324,7 +364,12 @@ pub enum RelocError {
 // bit_lower) with mask math in checked arithmetic").
 // ---------------------------------------------------------------------------
 
-/// Checked read of a `word_bits`-wide word at `offset`.
+/// CEP:WHAT: Checked read of a word_bits-wide word at offset (word_bits in {16, 32, 64}), assembled with the explicit endianness.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: InvalidOffset (offset+size overflows or exceeds buf.len()), PatchOverflow (unsupported width).
+/// CEP:ASSUMES: domain: buf any slice; offset u64; word_bits in {16, 32, 64}.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (every accepted patch round-trips); EXH exh_field_math_guards.
 pub fn extract_word(
     buf: &[u8],
     offset: u64,
@@ -362,7 +407,12 @@ pub fn extract_word(
     Ok(word)
 }
 
-/// Checked write of the low `word_bits` bits of `value` at `offset`.
+/// CEP:WHAT: Checked write of the low word_bits bits of value at offset, with the explicit endianness.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: InvalidOffset, PatchOverflow (unsupported width).
+/// CEP:ASSUMES: domain: as extract_word.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (round-trip).
 pub fn write_word(
     buf: &mut [u8],
     offset: u64,
@@ -400,7 +450,12 @@ pub fn write_word(
     Ok(())
 }
 
-/// Checked bit-field extraction from a word: `(word >> bit_lower) & mask(field_bits)`.
+/// CEP:WHAT: Checked bit-field extraction from a word: (word >> bit_lower) & mask(field_bits).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: PatchOverflow (any parameter outside the domain: field_bits 0 or > 64, bit_lower >= 64, field_bits + bit_lower > 64).
+/// CEP:ASSUMES: domain: word_bits <= 64, bit_lower + field_bits <= word_bits.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_field_math_guards + the Adrp/Branch decode paths.
 pub fn extract_field(
     word: u64,
     bit_lower: u8,
@@ -426,7 +481,12 @@ fn sign_extend(bits: u64, field_bits: u8) -> i64 {
     (((bits << shift) as i64) >> shift)
 }
 
-/// ADRP imm21 decode: imm = immlo | (immhi << 2), sign-extended to i32 (R3).
+/// CEP:WHAT: ADRP imm21 decode: imm = immlo | (immhi << 2), sign-extended to i32 (R3: immlo bits 30-29, immhi bits 23-5).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (total).
+/// CEP:ASSUMES: domain: word any u32-as-u64.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_adrp_split_hand_words.
 pub fn adrp_decode_imm(word: u64) -> i32 {
     let immlo = (word >> ADRP_IMMLO_AT) & ((1u64 << BITS_IMMLO) - 1);
     let immhi = (word >> ADRP_IMMHI_AT) & ((1u64 << BITS_IMMHI) - 1);
@@ -436,7 +496,12 @@ pub fn adrp_decode_imm(word: u64) -> i32 {
     (((imm21 << shift) as i32) >> shift)
 }
 
-/// ADRP imm21 encode into an instruction word, preserving all other bits (R3).
+/// CEP:WHAT: ADRP imm21 encode into an instruction word, preserving all other bits (R3: immlo at bits 30-29, immhi at bits 23-5).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (total over the stated bit-pattern domain).
+/// CEP:ASSUMES: domain: imm21_bits is the 21-bit two's-complement pattern (range checked by callers).
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_adrp_split_hand_words.
 pub fn adrp_patch_word(word: u64, imm21_bits: u64) -> u64 {
     let immlo = imm21_bits & ((1u64 << BITS_IMMLO) - 1);
     let immhi = (imm21_bits >> BITS_IMMLO) & ((1u64 << BITS_IMMHI) - 1);
@@ -450,7 +515,12 @@ pub fn adrp_patch_word(word: u64, imm21_bits: u64) -> u64 {
 // Pinned value math per kind (R1/R3 formulas, exact).
 // ---------------------------------------------------------------------------
 
-/// Computes the pinned value of one relocation.
+/// CEP:WHAT: Computes the pinned value of one relocation: Abs64 checked u64 add (R1); Abs32/PcRel32/PcRel16/X86RipRel32 exact i128 math with the pinned signed range checks; ArmBranch26 mod-4 alignment + ±2^25 range on (S+A-P)/4; ArmAdrp page delta over 4096 with page(x) = x & !0xFFF and ±2^20 range.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: PatchOverflow (Abs64 u64 overflow; Adrp S+A < 0, i.e. not an address; X86RipRel32 site+4 overflow), FieldOutOfRange (Abs32/PcRel ranges), BranchRangeExceeded (misaligned or out of range), AdrpRangeExceeded, PageDeltaUnaligned (defensive, provably unreachable, kept per R8).
+/// CEP:ASSUMES: domain: symbol_value the resolved S (u64), addend A (i64), site P (u64); intermediates exact in i128 where the pinned text does not pin u64 semantics.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (exact variant at every lattice boundary).
 pub fn reloc_value(
     kind: RelocKind,
     symbol_value: u64,
@@ -534,7 +604,12 @@ pub fn reloc_value(
     }
 }
 
-/// Field geometry of each kind: the container word at `offset` is
+/// CEP:WHAT: Field geometry per kind: the container word at offset is word_bits wide; the value occupies field_bits at bit_lower inside it (0 for plain fields and for ArmBranch26's imm26 at bits [25:0]; ADRP_IMMHI_AT for Adrp's widest subfield anchor); ArmAdrp's 21 bits are split immlo/immhi and handled by the dedicated path.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (total over the 7 kinds).
+/// CEP:ASSUMES: anchor: pinned §5.9 field extraction + R3 splits + R7 ISA encoding (B/BL opcode [31:26], imm26 [25:0]).
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_field_math_guards + lattice round-trips.
 pub fn field_geometry(kind: RelocKind) -> (u8, u8, u8) {
     match kind {
         RelocKind::Abs64 => (BITS_ABS64, 0, BITS_ABS64),
@@ -547,7 +622,12 @@ pub fn field_geometry(kind: RelocKind) -> (u8, u8, u8) {
     }
 }
 
-/// Re-decodes the patched field back into its computed value (Volume 17 R11
+/// CEP:WHAT: Re-decodes the patched field back into its computed value (Volume 17 R11 re-validation math): for an accepted patch, decode_value afterwards returns exactly the PatchValue that patch computed.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: InvalidOffset (bounds), PatchOverflow (unsupported width or mask parameters).
+/// CEP:ASSUMES: domain: buf any section buffer; offset the field position.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: every accepted lattice case round-trips exactly.
 pub fn decode_value(
     buf: &[u8],
     kind: RelocKind,
@@ -589,7 +669,12 @@ pub fn decode_value(
 // Patch entry point.
 // ---------------------------------------------------------------------------
 
-/// Patches `buf` at `entry.offset` per `entry.kind`.
+/// CEP:WHAT: Patches buf at entry.offset per entry.kind: check order documented and deterministic — field bounds (R8 InvalidOffset) first, then the symbol (R8 SymbolUndefined), then the pinned value math (its own R8 variants), then the write-back per kind (whole word for byte-field kinds; read-modify-write preserving other bits for ArmAdrp immlo/immhi and ArmBranch26 imm26 at bits [25:0]).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: exactly the R8 enum (complete): InvalidOffset, SymbolUndefined, PatchOverflow, FieldOutOfRange, BranchRangeExceeded, AdrpRangeExceeded, PageDeltaUnaligned (defensive); UnsupportedKind is returned by check_kind_allowed, SymbolUndefined also by require_defined.
+/// CEP:ASSUMES: domain: buf any section buffer (bounds checked); symbol_value = resolved S (None = undefined); site the patch site; endianness explicit.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (30,240 cases, exact variant + round-trip); EXH exh_adrp_split_hand_words; EXH exh_branch26_misalignment; EXH exh_branch26_hand_words.
 pub fn patch(
     buf: &mut [u8],
     entry: &RelocEntry,
@@ -640,7 +725,12 @@ pub fn patch(
     }
 }
 
-/// `SymbolUndefined` gate (R8): the caller's resolution result as a value.
+/// CEP:WHAT: SymbolUndefined gate (R8): returns Ok iff the symbol is defined.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: SymbolUndefined iff !defined.
+/// CEP:ASSUMES: domain: defined any bool.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_error_variants_reachable.
 pub fn require_defined(defined: bool) -> Result<(), RelocError> {
     if defined {
         Ok(())
@@ -649,7 +739,12 @@ pub fn require_defined(defined: bool) -> Result<(), RelocError> {
     }
 }
 
-/// `UnsupportedKind` gate (R8): `allowed` is a bitmask over `RelocKind::bit()`.
+/// CEP:WHAT: UnsupportedKind gate (R8): allowed is a bitmask over RelocKind::bit(); bit set = allowed.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: UnsupportedKind iff the kind's bit is clear.
+/// CEP:ASSUMES: domain: allowed any u8.
+/// CEP:COST: O(1).
+/// CEP:EVIDENCE: EXH exh_error_variants_reachable.
 pub fn check_kind_allowed(kind: RelocKind, allowed: u8) -> Result<(), RelocError> {
     if allowed & (1 << kind.bit()) != 0 {
         Ok(())
@@ -909,6 +1004,40 @@ mod tests {
             patch(&mut buf, &entry_adrp, 0, Some(0), Endianness::Little),
             Err(RelocError::PatchOverflow)
         );
+    }
+
+
+    #[test]
+    fn exh_branch26_hand_words() {
+        // Placement-sensitive certificate (vote round 2, V3 observation): the
+        // A64 B/BL encoding is opcode bits [31:26] (B = 000101, BL = 100101)
+        // and imm26 at bits [25:0] (R7 -> R_AARCH64_CALL26). A wrong
+        // BRANCH_IMM_AT would corrupt the opcode or leave stale bits; the
+        // lattice round-trip alone is placement-neutral, so these hand words
+        // are the placement evidence.
+        for &endian in &[Endianness::Little, Endianness::Big] {
+            // BL base + imm = 1 -> low 26 bits = 1, opcode preserved.
+            let mut buf = [0u8; BUF_LEN];
+            write_word(&mut buf, 0, BITS_32, 0x9400_0000, endian).unwrap();
+            let entry = RelocEntry { offset: 0, kind: RelocKind::ArmBranch26, symbol: SymId(1), addend: 0 };
+            patch(&mut buf, &entry, 0, Some(4), endian).unwrap();
+            let word = extract_word(&buf, 0, BITS_32, endian).unwrap();
+            assert_eq!(word, 0x9400_0001, "BL imm=1 placement");
+            assert_eq!((word >> 26) & 0x3F, 0x25, "BL opcode preserved");
+            // B base + imm = -1 -> low 26 bits all set, opcode preserved.
+            let mut buf = [0u8; BUF_LEN];
+            write_word(&mut buf, 0, BITS_32, 0x1400_0000, endian).unwrap();
+            patch(&mut buf, &entry, 4, Some(0), endian).unwrap();
+            let word = extract_word(&buf, 0, BITS_32, endian).unwrap();
+            assert_eq!(word, 0x17FF_FFFF, "B imm=-1 placement");
+            assert_eq!((word >> 26) & 0x3F, 0x05, "B opcode preserved");
+            // Stale-bit check: pre-set all low 26 bits, then patch imm = 0.
+            let mut buf = [0u8; BUF_LEN];
+            write_word(&mut buf, 0, BITS_32, 0x1400_0000 | 0x03FF_FFFF, endian).unwrap();
+            patch(&mut buf, &entry, 0, Some(0), endian).unwrap();
+            let word = extract_word(&buf, 0, BITS_32, endian).unwrap();
+            assert_eq!(word, 0x1400_0000, "stale imm26 bits cleared");
+        }
     }
 
     #[test]

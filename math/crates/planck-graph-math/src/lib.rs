@@ -21,9 +21,9 @@ use core::cmp::Ordering as CmpOrdering;
 // Named constants (Law 7). Every bound below is cited to its spec row.
 // ---------------------------------------------------------------------------
 
-/// Maximum nodes per graph: Volume 12 limits table row L13, "Max IR nodes per
+/// Maximum nodes per graph: Volume 12 limits table row L13, "Max IR nodes per function = 16777216 (2^24)".
 ///
-/// CEP:WHAT: Maximum nodes per graph: Volume 12 limits table row L13, "Max IR nodes per
+/// CEP:WHAT: Maximum nodes per graph: Volume 12 limits table row L13, "Max IR nodes per function = 16777216 (2^24)".
 /// CEP:STATUS: complete
 /// CEP:FAILURE: none
 /// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
@@ -31,7 +31,7 @@ use core::cmp::Ordering as CmpOrdering;
 /// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const MAX_NODES: u32 = 16_777_216;
 
-/// Three-color DFS mark: unseen (SPEC-INDEX §5.7 "three-color DFS").
+/// Three-color DFS mark: unseen (SPEC-INDEX §5.7 "three-color DFS": white = unvisited).
 ///
 /// CEP:WHAT: Three-color DFS mark: unseen (SPEC-INDEX §5.7 "three-color DFS").
 /// CEP:STATUS: complete
@@ -40,7 +40,7 @@ pub const MAX_NODES: u32 = 16_777_216;
 /// CEP:COST: compile-time constant; no runtime cost.
 /// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const COLOR_WHITE: u8 = 0;
-/// Three-color DFS mark: on the current DFS path.
+/// Three-color DFS mark: on the current DFS path (gray).
 ///
 /// CEP:WHAT: Three-color DFS mark: on the current DFS path.
 /// CEP:STATUS: complete
@@ -49,7 +49,7 @@ pub const COLOR_WHITE: u8 = 0;
 /// CEP:COST: compile-time constant; no runtime cost.
 /// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const COLOR_GRAY: u8 = 1;
-/// Three-color DFS mark: fully processed.
+/// Three-color DFS mark: fully processed (black).
 ///
 /// CEP:WHAT: Three-color DFS mark: fully processed.
 /// CEP:STATUS: complete
@@ -59,9 +59,9 @@ pub const COLOR_GRAY: u8 = 1;
 /// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const COLOR_BLACK: u8 = 2;
 
-/// Dominator sentinel: node not reachable from the entry (Volume 13 I-invariants
+/// Dominator sentinel: node not reachable from the entry (Volume 13 I-invariants treat unreachable nodes as a separate check; their dominator entry is this sentinel, never a fabricated immediate dominator).
 ///
-/// CEP:WHAT: Dominator sentinel: node not reachable from the entry (Volume 13 I-invariants
+/// CEP:WHAT: Dominator sentinel: node not reachable from the entry (Volume 13 I-invariants treat unreachable nodes as a separate check; their dominator entry is this sentinel, never a fabricated immediate dominator).
 /// CEP:STATUS: complete
 /// CEP:FAILURE: none
 /// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
@@ -73,7 +73,12 @@ pub const UNREACHABLE: u32 = u32::MAX;
 // Errors (complete enum; CEP:FAILURE discipline).
 // ---------------------------------------------------------------------------
 
-/// Which caller buffer was too small (complete; one variant per buffer kind).
+/// CEP:WHAT: Which caller buffer was too small; one variant per buffer kind, complete by construction.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (data value naming a too-small caller buffer).
+/// CEP:ASSUMES: each variant corresponds to exactly one caller-provided buffer of the pinned functions; see the function docs for capacities.
+/// CEP:COST: data type; cost carried by the functions over it.
+/// CEP:EVIDENCE: EXH exh_buffer_and_input_errors (every variant reachable from stated inputs).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BufferKind {
     /// Indegree scratch for `topo_order` (needs `node_count` words).
@@ -119,7 +124,12 @@ pub enum GraphError {
 // CSR graph (static arrays; SPEC-INDEX §5.7 "graphs are static arrays").
 // ---------------------------------------------------------------------------
 
-/// A graph in CSR form: node `v`'s successors are
+/// CEP:WHAT: A graph in CSR form: node v's successors are targets[starts[v] as usize .. starts[v+1] as usize].
+/// CEP:STATUS: complete
+/// CEP:FAILURE: `validate` returns exactly: NodeCountExceedsLimit, MalformedStarts, InvalidNodeReference; `degree` is caller-domain-checked (v < node_count).
+/// CEP:ASSUMES: domain: node_count <= MAX_NODES (L13), starts.len() == node_count + 1, starts[0] == 0, starts non-decreasing, every target < node_count.
+/// CEP:COST: O(1) degree; validate O(n + m).
+/// CEP:EVIDENCE: EXH exh_all_digraphs_n_le_4_topo_cycle_dominators (every enumerated CSR validates); EXH exh_buffer_and_input_errors.
 #[derive(Clone, Copy)]
 pub struct Csr<'a> {
     /// Number of nodes `n`; node IDs are `0..n`.
@@ -132,6 +142,13 @@ pub struct Csr<'a> {
 
 impl<'a> Csr<'a> {
     /// Out-degree of `v` (`v < node_count`; caller-checked).
+    ///
+    /// CEP:WHAT: Out-degree of v (successor count).
+    /// CEP:STATUS: complete
+    /// CEP:FAILURE: none (panics only on a caller-side invalid v, outside the domain; validate is the gate).
+    /// CEP:ASSUMES: domain: v < node_count and a validated CSR.
+    /// CEP:COST: O(1).
+    /// CEP:EVIDENCE: exercised on every enumerated graph.
     pub fn degree(&self, v: u32) -> u32 {
         let s = self.starts[v as usize];
         let e = self.starts[v as usize + 1];
@@ -139,6 +156,13 @@ impl<'a> Csr<'a> {
     }
 
     /// Structural validation: the full `Csr` domain above.
+    ///
+    /// CEP:WHAT: Structural validation of the CSR domain (L13 bound, starts length/zero/monotone, target range).
+    /// CEP:STATUS: complete
+    /// CEP:FAILURE: the three CSR variants of GraphError (complete): NodeCountExceedsLimit, MalformedStarts, InvalidNodeReference.
+    /// CEP:ASSUMES: domain: any &Csr.
+    /// CEP:COST: O(n + m).
+    /// CEP:EVIDENCE: EXH exh_buffer_and_input_errors (each variant) + every enumerated graph validates cleanly.
     pub fn validate(&self) -> Result<(), GraphError> {
         if self.node_count > MAX_NODES {
             return Err(GraphError::NodeCountExceedsLimit);
@@ -169,7 +193,12 @@ impl<'a> Csr<'a> {
 // Topological order: Kahn's algorithm, ascending-ID tie-break (G14).
 // ---------------------------------------------------------------------------
 
-/// Kahn's algorithm with stable tie-break by ascending node ID.
+/// CEP:WHAT: Kahn's algorithm with stable tie-break by ascending node ID; on success writes the order into out[0..k] and returns k (always node_count — a leftover node means a cycle, which is the CycleDetected error, never a partial order).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: CycleDetected, MalformedStarts, InvalidNodeReference, NodeCountExceedsLimit, BufferTooSmall(Indeg|Heap|Output).
+/// CEP:ASSUMES: domain: validated CSR; indeg.len() >= n, heap.len() >= n, out.len() >= n; binary min-heap keyed by node ID gives the ascending tie-break (determinism, G14).
+/// CEP:COST: O((n + m) log n).
+/// CEP:EVIDENCE: EXH exh_all_digraphs_n_le_4_topo_cycle_dominators and EXH exh_all_dags_n_5_topo_dominators (order validity, Kahn/cycle agreement, determinism, ascending tie-break vs lexicographic reference).
 pub fn topo_order(
     g: &Csr,
     indeg: &mut [u32],
@@ -295,6 +324,13 @@ fn heap_pop_min(heap: &mut [u32], len: &mut usize) -> u32 {
 // ---------------------------------------------------------------------------
 
 /// One iterative-DFS frame: node plus its next unexplored edge position.
+///
+/// CEP:WHAT: One iterative-DFS frame: node plus its next unexplored edge position.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none (data record).
+/// CEP:ASSUMES: stack capacity requirement: node_count frames (see find_cycle/dfs_postorder).
+/// CEP:COST: 8 bytes (Copy); zero runtime cost.
+/// CEP:EVIDENCE: exercised on every enumerated graph.
 #[derive(Clone, Copy)]
 pub struct DfsFrame {
     /// Node whose edges are being explored.
@@ -303,7 +339,12 @@ pub struct DfsFrame {
     pub next_edge: u32,
 }
 
-/// Three-color iterative cycle detection (SPEC-INDEX §5.7): on a cycle, writes
+/// CEP:WHAT: Three-color iterative cycle detection: on a cycle, writes one cycle as a node list into path[0..k] (closed implicitly; consecutive entries are edge-joined and the last entry has an edge back to the first) and returns Some(k); on an acyclic graph returns Ok(None).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: the CSR variants + BufferTooSmall(Color|DfsStack|CyclePath).
+/// CEP:ASSUMES: domain: validated CSR; color.len() >= n bytes, stack.len() >= n frames, path.len() >= n words (G17: reports one cycle as a node list).
+/// CEP:COST: O(n + m).
+/// CEP:EVIDENCE: agreement with Kahn on every enumerated digraph; every reported cycle is edge-verified in the tests.
 pub fn find_cycle(
     g: &Csr,
     color: &mut [u8],
@@ -382,7 +423,12 @@ pub fn find_cycle(
 // Reachability, postorder, and reverse CSR (dominator support math).
 // ---------------------------------------------------------------------------
 
-/// Iterative DFS from `entry` over `g`, writing the postorder of the reachable
+/// CEP:WHAT: Iterative DFS from entry over g, writing the postorder of the reachable subgraph into out[0..k] (children before parent; entry is last) and the visited mark into seen; returns k.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: EntryOutOfRange + the CSR variants + BufferTooSmall(Color|DfsStack|Output).
+/// CEP:ASSUMES: domain: validated CSR; entry < node_count; seen.len() >= n bytes, stack.len() >= n frames, out.len() >= n words.
+/// CEP:COST: O(n + m).
+/// CEP:EVIDENCE: exercised on every enumerated graph; the dominator tests consume its output.
 pub fn dfs_postorder(
     g: &Csr,
     entry: u32,
@@ -434,7 +480,12 @@ pub fn dfs_postorder(
     Ok(k)
 }
 
-/// Reverse postorder: writes `postorder` reversed into `rpo` (same length).
+/// CEP:WHAT: Reverse postorder: writes postorder reversed into rpo (same length).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: BufferTooSmall(Output) if rpo is short.
+/// CEP:ASSUMES: domain: rpo.len() >= postorder.len().
+/// CEP:COST: O(k).
+/// CEP:EVIDENCE: consumed by every dominator test.
 pub fn reverse_postorder(postorder: &[u32], rpo: &mut [u32]) -> Result<(), GraphError> {
     if rpo.len() < postorder.len() {
         return Err(GraphError::BufferTooSmall(BufferKind::Output));
@@ -448,7 +499,12 @@ pub fn reverse_postorder(postorder: &[u32], rpo: &mut [u32]) -> Result<(), Graph
     Ok(())
 }
 
-/// Builds the reverse view of a validated CSR into caller buffers:
+/// CEP:WHAT: Builds the reverse view of a validated CSR into caller buffers (rev_starts.len() >= node_count + 1, rev_targets.len() >= targets.len()); after success, rev is a CSR whose edges are the reversed edges of g, sources ascending within each bucket (deterministic).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: the CSR variants + BufferTooSmall(RevStarts|RevTargets).
+/// CEP:ASSUMES: domain: validated CSR + the two buffer capacities; in-place cursor fill with right-shift repair (no allocation).
+/// CEP:COST: O(n + m).
+/// CEP:EVIDENCE: every dominator test computes the reverse and asserts the reversed edge multiset mirrors the forward one.
 pub fn reverse(
     g: &Csr,
     rev_starts: &mut [u32],
@@ -509,7 +565,12 @@ pub fn reverse(
 // Dominators: iterative dataflow over reverse postorder (pinned §5.7).
 // ---------------------------------------------------------------------------
 
-/// Iterative dominator computation (the classic RPO dataflow with the
+/// CEP:WHAT: Iterative dominator computation (RPO dataflow with the intersect operator) over the PREDECESSOR CSR preds and the reverse postorder rpo of the nodes reachable from entry: idom[v] for reachable v != entry; idom[entry] = entry; idom[v] = UNREACHABLE for unreachable nodes; passes = sweeps until no change (pinned termination measure passes <= n with early exit, G11).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: EntryOutOfRange + CSR variants + BufferTooSmall(RpoIndex|Idom).
+/// CEP:ASSUMES: domain: validated preds CSR (same node set); entry < node_count; rpo holds distinct reachable node IDs headed by entry (as produced by dfs_postorder + reverse_postorder); rpo_index.len() >= n, idom.len() >= n.
+/// CEP:COST: O(n·p·d + m_pred), p <= n instrumented.
+/// CEP:EVIDENCE: EXH exh_all_digraphs_n_le_4_topo_cycle_dominators and EXH exh_all_dags_n_5_topo_dominators (output vs extensional definition via naive simple-path enumeration; passes <= n asserted on every instance).
 pub fn dominators(
     preds: &Csr,
     entry: u32,
