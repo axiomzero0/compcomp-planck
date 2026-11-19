@@ -1,0 +1,17 @@
+# Planck math kernel — extracted compiler mathematics.
+# Zero external dependencies (offline build). Kernels are no_std; tests may use std.
+[workspace]
+resolver = "2"
+members = ["crates/planck-charclass", "crates/planck-token-math", "crates/planck-operator-math", "crates/planck-effect-math", "crates/planck-ownership-math", "crates/planck-graph-math", "crates/planck-regalloc-math", "crates/planck-reloc-math"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "Apache-2.0"
+
+[profile.release]
+overflow-checks = false
+panic = "abort"
+
+[profile.test]
+overflow-checks = true

@@ -1,0 +1,18 @@
+CEP:FILE: tools/fv/matp/artifacts/own_endborrow_borrowed_mut.result
+CEP:WHAT: MATP verification artifact for obligation own_endborrow_borrowed_mut.
+CEP:WHY: Independently checkable proof artifact (verification standards G15, G18); produced by tools/fv/matp-driver.
+CEP:STATUS: partial
+CEP:FAILURE: Regenerate with the matp-fv-driver if the problem or the pinned MATP revision changes.
+CEP:ASSUMES: MAPT pinned at revision 677bea9 (trusted computing base).
+CEP:COST: offline artifact.
+CEP:EVIDENCE: this file.
+CEP:SECURITY: repository-trusted input.
+
+OBLIGATION: own_endborrow_borrowed_mut
+PROBLEM: /home/z/my-project/compcomp-planck/tools/fv/matp/problems/own_endborrow_borrowed_mut.p
+EXPECTED: theorem
+OUTCOME: Saturated
+GIVEN_PROCESSED: 779
+BOUND: 200000 iterations (documented per CEP&CC 54.5.2; no wall-clock bound)
+STATUS: fail
+MAPT_REVISION: 677bea9 (github.com/compilecomp/MATP)

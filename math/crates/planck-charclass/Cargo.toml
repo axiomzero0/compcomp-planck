@@ -1,0 +1,7 @@
+# CEP:WHAT: planck-charclass — pinned ASCII character-class kernel of the Planck compiler (Volume 02 §2.2.0, SPEC-INDEX §5.10).
+# CEP:WHY: Zero external dependencies (offline build); lib target only; no_std kernel with std available only to tests.
+[package]
+name = "planck-charclass"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
