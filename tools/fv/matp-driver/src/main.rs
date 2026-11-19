@@ -6,7 +6,7 @@
 //! CEP:FAILURE: Exits nonzero if any problem fails to parse, any outcome mismatches its expectation, or the iteration bound fires (GaveUp is never accepted as a pass).
 //! CEP:ASSUMES: MAPT is pinned at revision 677bea9 (trusted computing base, verification standards G16); problems are repository-trusted; include directives resolve under the problems root.
 //! CEP:COST: offline tool; runtime cost irrelevant.
-//! CEP:EVIDENCE: tools/fv/matp/artifacts/*.result (one per obligation, STATUS: pass).
+//! CEP:EVIDENCE: tools/fv/matp/artifacts/*.result (one per obligation; each records the actual outcome as-is — a result other than its EXPECTED value has STATUS: fail and the obligation is discharged by another engine per SPEC-INDEX section 4, never silently).
 //! CEP:SECURITY: repository-trusted inputs; no network; bounded by the documented iteration limit.
 //! CEP:FV-CLASS: FV-0/FV-2
 //! CEP:FV-PROVER: MATP (given-clause saturation, superposition + resolution, KBO)

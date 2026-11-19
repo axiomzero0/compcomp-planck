@@ -32,7 +32,7 @@ Rules:
 2. DR-1.2: Rocq is the primary proof assistant. Constructive proofs of semantic preservation (G1), type soundness (G3), and pass correctness (G4, G5) are Rocq obligations. Rocq artifacts live under `rocq/` (pinned Rocq version, section 6).
 3. DR-1.3: MATP is the complementary prover for first-order algebraic obligations where its theories apply (effect lattice laws, operator-table properties, relocation overflow bounds). It remains pinned at revision 677bea9 as recorded in `tools/fv/matp/artifacts/`.
 4. DR-1.4: Peregrine is the first extraction route to Rust. No Peregrine output is trusted until OB-DR-1 through OB-DR-4 (section 5) are discharged.
-5. DR-1.5: Z3 (bounded SMT), EXH (exhaustive finite-domain proof), PROP (paired property testing), and REVIEW remain the obligation methods of SPEC-INDEX section 4. Rocq adds a fifth method value `ROCQ` for constructive proofs; a `ROCQ` row must name the exact Rocq version, the file under `rocq/`, and the compiled `.vo` check command.
+5. DR-1.5: Z3 (bounded SMT), EXH (exhaustive finite-domain proof), PROP (paired property testing), and REVIEW remain the obligation methods of SPEC-INDEX section 4. Rocq adds a fifth method value `ROCQ` for constructive proofs; a `ROCQ` row must name the exact Rocq version, the file under `rocq/`, and the compiled `.vo` check command. `DIF` (differential equivalence against the `math/` kernels over a stated domain, paired per the pairing rule) is added as a sixth method value for untrusted extraction output; both additions are mirrored in SPEC-INDEX section 4 item 2.
 6. DR-1.6: A small trusted proof checker is adopted as the independent-checking instrument for G18. Its design obligation is OB-DR-5; until it exists, G18 independence is provided by dual-engine discharge (Rocq + MATP/Z3) on the same obligation.
 
 ## 2. Why not Lean alone, why not MATP alone (recorded rationale, non-normative)
@@ -55,12 +55,12 @@ These facts constrain what OB-DR-1..4 must verify. Nothing here is assumed beyon
 The TCB is layered:
 
 1. Proof layer (trusted): the Rocq kernel (pinned version, section 6); the math kernel `math/` (FV-checked per section 54 of standards.md); Z3 scripts in `tools/fv/`; MATP pinned at 677bea9; the review process.
-2. Extraction layer (NOT trusted yet): Peregrine lambda-box middle end and ConCert Rust backend. Trust is conditional on OB-DR-1..4. Until then, any Peregrine output is treated as an unverified artifact and must pass differential equivalence checking against the hand-written `math/` kernels (method DIF: differential test + certificate comparison, paired with EXH or Z3 per SPEC-INDEX section 4.3).
+2. Extraction layer (NOT trusted yet): Peregrine lambda-box middle end and ConCert Rust backend. Trust is conditional on OB-DR-1..4. Until then, any Peregrine output is treated as an unverified artifact and must pass differential equivalence checking against the hand-written `math/` kernels (method DIF: differential test + certificate comparison, paired with EXH or Z3 per the SPEC-INDEX section 4 pairing rule).
 3. Deployment layer (trusted for execution, outside the proof for now): rustc and its backend. OB-DR-4 bounds what must be assumed of them.
 
 `math/` remains the executable reference: hand-written Rust kernels that are exhaustively or bounded verified, and against which any extracted Rust is differentially checked. This preserves the standing equivalence claim of SPEC-INDEX section 5.1: equivalent over the whole defined input domain, because limits are part of the specification (G13, G14).
 
-## 5. Qualification obligations (the four conditions, normative)
+## 5. Qualification obligations (the user's four conditions plus the checker-design obligation, normative)
 
 These are the conditions of adoption stated as obligations with verification rows. They are added to the Volume 22 verification matrix.
 
@@ -82,7 +82,7 @@ Rule: DR-5.1 — OB-DR-1..4 are sequenced: 2 gates 3 (no subset, no equivalence 
 | Peregrine | revision pinned when the feasibility study lands (`rocq/subset-report.md` prerequisite) | PF-1..PF-5 facts are per-site, versionless until pinned |
 | MATP | 677bea9 (github.com/compilecomp/MATP) | existing artifacts cite this |
 | Z3 | the version string recorded in each `tools/fv/` script header | existing scheme |
-| rustc | pinned by the workspace `rust-toolchain.toml` of `math/` | deployment layer |
+| rustc | pinned by `math/rust-toolchain.toml` (created at the first deployment-layer pin; until then the pin is the toolchain that builds `math/`, recorded in the build log) | deployment layer |
 
 ## 7. Integration with the existing library
 

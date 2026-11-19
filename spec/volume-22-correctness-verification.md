@@ -306,7 +306,7 @@ The five transitions, each with a defined preservation statement and mechanism; 
 
 ## 22.13 Trusted computing base (defines design.md 30.5, bullets B30-32..B30-43)
 
-Per SPEC-INDEX §3 the TCB is exactly: (T1) the Planck math kernel (`math/` crates, FV-checked), (T2) the Z3 scripts (`tools/fv/`) and the Z3 kernel at the pinned version, (T3) the review process (human judgment records), (T4) the stage-0 compiler (bootstrap trust model). The §30.5 candidate components are classified; a component is trusted iff it is in {T1..T4}; every other component is a verified artifact carrying obligations:
+Per SPEC-INDEX §3 the TCB is exactly: (T1) the Planck math kernel (`math/` crates, FV-checked), (T2) the Z3 scripts (`tools/fv/`) and the Z3 kernel at the pinned version, (T3) the review process (human judgment records), (T4) the stage-0 compiler (bootstrap trust model). Amendment pointer (CEP-DR-01, in force now; this volume's T1..T4 enumeration is revised at its next revision per DR-7.2 to fold in the layered TCB): the proof layer gains the Rocq kernel at its pinned version (constructive proofs, `rocq/`) and MATP pinned at 677bea9 (first-order obligations), and the extraction layer (Peregrine/ConCert Rust route) is NOT trusted until OB-DR-1..4 discharge; until that revision, CEP-DR-01 §4 is the normative layered-TCB statement and this enumeration remains true for the layers it names. The checker-design obligation OB-DR-5 (small trusted proof checker) lands here as a verification-matrix row at the same revision. The §30.5 candidate components are classified; a component is trusted iff it is in {T1..T4}; every other component is a verified artifact carrying obligations:
 
 | Bullet | Component | Classification | Basis |
 | --- | --- | --- | --- |
@@ -330,7 +330,7 @@ Trust argument (G16): the end-to-end semantic-preservation claim rests on T1–T
 | Bullet | Settled definition |
 | --- | --- |
 | B30-44 Specification language | This spec library: structured markdown volumes with obligation IDs, plus SMT-LIB 2.x scripts for machine-checked fragments; obligations are stated as judgments/invariants (ATP-cast per SPEC-INDEX §1.3) |
-| B30-45 Proof assistant | Z3 (version pinned in every script header; strict timeout 10 s per SPEC-INDEX §4.2) for bounded SMT checks; MAPT (the project ATP, SPEC-INDEX §3) for first-order obligations where its theories apply |
+| B30-45 Proof assistant | Z3 (version pinned in every script header; strict timeout 10 s per SPEC-INDEX §4.2) for bounded SMT checks; MATP (the project ATP, SPEC-INDEX §3) for first-order obligations where its theories apply |
 | B30-46 Formal models | The `math/` kernels, the ownership state machine (SPEC-INDEX §5.4), the effect algebra (§5.3), and the reference interpreter (§22.4) |
 | B30-47 Verified algorithms | The kernel crates (graph, regalloc, reloc, …) with per-function certificates in the §5.1 equivalence-claim form |
 | B30-48 Proof automation | Deterministic tactic scripts in `tools/fv/`: no randomness, no wall-clock reads, fixed 10 s timeout, documented in each script header |

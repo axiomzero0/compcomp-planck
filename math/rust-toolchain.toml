@@ -1,0 +1,11 @@
+# CEP:FILE: math/rust-toolchain.toml
+# CEP:WHAT: Deployment-layer rustc pin for the Planck math kernel workspace (CEP-DR-01 §6, row rustc; OB-DR-4 stream).
+# CEP:WHY: CEP-DR-01 §4 layer 3 requires the rustc assumption set (OB-DR-4) to be stated against a pinned compiler; the pin is the integrity anchor of the deployment layer (G16).
+# CEP:STATUS: complete
+# CEP:FAILURE: A build against a different rustc than this pin must regenerate the OB-DR-4 assumption rows before any extracted-Rust artifact is accepted.
+# CEP:ASSUMES: rustup-compatible toolchains; the pinned version is the one the kernel certificates were verified under (cargo/rustc 1.100.0, tests 93/93 in release and debug profiles).
+# CEP:COST: none.
+# CEP:EVIDENCE: this file; math/ test logs.
+# CEP:SECURITY: repository-trusted input.
+[toolchain]
+channel = "1.100.0"

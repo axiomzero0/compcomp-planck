@@ -5,7 +5,7 @@
 // CEP:FAILURE: A predicate that returns membership other than the pinned §2.2.0 set for any of the 256 byte values is non-conforming; the EXH truth-table tests fail and the crate must not ship. No other failure mode exists: every predicate is total and pure.
 // CEP:ASSUMES: Volume 02 §2.2.0 (exact class sets), §2.2.1-§2.2.2 (identifier grammar; identifiers are ASCII in edition P1), §2.2.15 (comment introducers are the byte pairs 0x2F 0x2F and 0x2F 0x2A); SPEC-INDEX §5.2 (kernel implementation law: core:: only, no allocation, no panic, no unsafe in non-test code); SPEC-INDEX §5.1 (equivalence claim form).
 // CEP:COST: O(1) per predicate call (2-4 comparisons, branch-friendly); class masks are compile-time constants; no allocation anywhere.
-// CEP:EVIDENCE: EXH exh_predicates_match_truth_tables_256 (256 bytes x 7 predicates vs const truth tables); EXH exh_predicates_match_class_masks_256 (256 bytes x 6 predicates vs const masks); PROP prop_random_bytes_match_truth_tables (10,000 deterministic PRNG bytes, paired with the EXH above).
+// CEP:EVIDENCE: EXH exh_predicates_match_truth_tables_256 (256 bytes x 7 predicates vs const truth tables); EXH exh_predicates_match_class_masks_256 (bytes 0..=127 x 6 predicates vs const u128 masks — the mask bound is the u128 width; all pinned members are ASCII, and the 256-byte truth-table test above is the full-domain certificate); PROP prop_random_bytes_match_truth_tables (10,000 deterministic PRNG bytes, paired with the EXH above).
 // CEP:FV-CLASS: FV-0
 // CEP:FV-PROVER: Rust test harness (EXH over the complete 256-byte domain, test-as-proof)
 // CEP:FV-SCRIPT: crates/planck-charclass/src/lib.rs (#[cfg(test)] mod tests)
@@ -398,7 +398,9 @@ mod tests {
 
     /// EXH certificate: every predicate equals its class mask bit on all 256 byte values,
     /// and every mask equals its truth table bit-for-bit (definition-of-record consistency).
-    /// Domain: 256 bytes x 6 predicates + 6 mask/table comparisons of 128 bits each (full domain).
+    /// Domain: bytes 0..=127 x 6 predicates (the u128 mask bound) + 6 mask/table
+    /// comparisons of 128 bits each; the 256-byte truth-table test is the
+    /// full-domain certificate (all pinned members are ASCII).
     #[test]
     fn exh_predicates_match_class_masks_256() {
         let mut i = 0usize;

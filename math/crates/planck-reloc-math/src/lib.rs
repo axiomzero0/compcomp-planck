@@ -2,8 +2,8 @@
 // CEP:WHAT: Pinned relocation math of the Planck compiler (SPEC-INDEX §5.9, elaborated by Volume 17 §17.2): the seven relocation kinds with exact value formulas, signed range checks, checked field extraction/mask math, explicit endianness, AArch64 ADRP immlo/immhi bit split and B/BL imm26 field patching, and the complete RelocError enum of Volume 17 R8.
 // CEP:WHY: SPEC-INDEX §5.1 pins planck-reloc-math as the extraction home of the object-generation relocation math (Volume 17 §17.2); the internal linker (Volume 17 L2) and every code writer must call exactly these functions so that every patched field satisfies the pinned inequalities and R11 re-validation can decode what was encoded.
 // CEP:STATUS: complete
-// CEP:FAILURE: Any accept/reject decision on the pinned boundary lattice that does not return exactly the named RelocError variant, any silent truncation, any host-endian assumption, or any arithmetic overflow that panics instead of returning PatchOverflow is non-conforming; the EXH cross-product test over 7 kinds x 2 endiannesses x 6 offsets x 9 addends x 8 symbol values x 5 sites (30,240 cases) fails the build. No other failure mode exists: every function is total over its stated domain and returns explicit errors.
-// CEP:ASSUMES: SPEC-INDEX §5.9 (pinned kinds and range checks), §5.2 (kernel implementation law: core:: only, no allocation, no panic, no unsafe in non-test code); Volume 17 R1 (absolute: Abs64 checked u64 add -> PatchOverflow, Abs32 exact signed-32 range -> FieldOutOfRange), R3 (PC-relative: PcRel32/PcRel16/X86RipRel32 exact ranges with P = site or site + 4; ArmBranch26 (S+A-P) ≡ 0 mod 4 and −2^25 <= (S+A−P)/4 <= 2^25−1 -> BranchRangeExceeded; ArmAdrp page delta over 4096 with page(x) = x & !0xFFF, −2^20 <= delta/4096 <= 2^20−1 -> AdrpRangeExceeded, 21-bit field split immlo = bits 30–29, immhi = bits 23–5), R7 (ArmBranch26 is R_AARCH64_CALL26: the A64 B/BL encoding, immediate at bits [23:5] of the 32-bit instruction word — the bit position of the imm26 container is the ISA encoding referenced by R7), R8 (complete error enum, exactly: FieldOutOfRange, PageDeltaUnaligned, BranchRangeExceeded, AdrpRangeExceeded, SymbolUndefined, InvalidOffset, UnsupportedKind, PatchOverflow), R11 (post-patch re-validation; `decode_value` is its math).
+// CEP:FAILURE: Any accept/reject decision on the pinned boundary lattice that does not return exactly the named RelocError variant, any silent truncation, any host-endian assumption, or any arithmetic overflow that panics instead of returning PatchOverflow is non-conforming; the EXH cross-product test over 7 kinds x 2 endiannesses x 6 offsets x 9 addends x 8 symbol values x 5 sites (30,240 cases) fails the build. RelocError is complete and every variant is reachable: FieldOutOfRange (Abs32/Abs32-range kinds), PageDeltaUnaligned (defensive, provably unreachable from patch inputs, kept per R8), BranchRangeExceeded (ArmBranch26 misaligned or out of range), AdrpRangeExceeded (ArmAdrp page range), SymbolUndefined (undefined symbol), InvalidOffset (offset bounds), UnsupportedKind (check_kind_allowed gate), PatchOverflow (checked-arithmetic failures). No other failure mode exists: every function is total over its stated domain and returns explicit errors.
+// CEP:ASSUMES: SPEC-INDEX §5.9 (pinned kinds and range checks), §5.2 (kernel implementation law: core:: only, no allocation, no panic, no unsafe in non-test code); Volume 17 R1 (absolute: Abs64 checked u64 add -> PatchOverflow, Abs32 exact signed-32 range -> FieldOutOfRange), R3 (PC-relative: PcRel32/PcRel16/X86RipRel32 exact ranges with P = site or site + 4; ArmBranch26 (S+A-P) ≡ 0 mod 4 and −2^25 <= (S+A−P)/4 <= 2^25−1 -> BranchRangeExceeded; ArmAdrp page delta over 4096 with page(x) = x & !0xFFF, −2^20 <= delta/4096 <= 2^20−1 -> AdrpRangeExceeded, 21-bit field split immlo = bits 30–29, immhi = bits 23–5), R7 (ArmBranch26 is R_AARCH64_CALL26: the A64 B/BL encoding, opcode bits [31:26] = 000101/100101, immediate bits [25:0] — the bit position of the imm26 container is the ISA encoding referenced by R7), R8 (complete error enum, exactly: FieldOutOfRange, PageDeltaUnaligned, BranchRangeExceeded, AdrpRangeExceeded, SymbolUndefined, InvalidOffset, UnsupportedKind, PatchOverflow), R11 (post-patch re-validation; `decode_value` is its math).
 // CEP:COST: O(1) per patch/decode (fixed field widths, checked arithmetic only); no allocation anywhere; all buffers are caller-provided slices.
 // CEP:EVIDENCE: EXH exh_patch_boundary_lattice_all_kinds (30,240 accept/reject cases across the full stated boundary lattice, each asserting the exact outcome and round-tripping accepted patches through decode_value); EXH exh_adrp_split_hand_words (hand-computed ADRP instruction words for the immlo/immhi split, both endiannesses); EXH exh_branch26_misalignment (delta ≡ 1, 2, 3 mod 4 rejected with BranchRangeExceeded); EXH exh_field_math_guards (mask/parameter violations -> PatchOverflow, bounds -> InvalidOffset); EXH exh_error_variants_reachable (all 8 RelocError variants reachable from stated inputs).
 // CEP:FV-CLASS: FV-0
@@ -20,52 +20,206 @@
 // ---------------------------------------------------------------------------
 
 /// Abs64 field width in bits (Volume 17 R1: "written as 64 bits").
+///
+/// CEP:WHAT: Abs64 field width in bits (Volume 17 R1: "written as 64 bits").
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BITS_ABS64: u8 = 64;
+/// ArmAdrp immediate width (R3: 21-bit field, immlo + immhi).
+///
+/// CEP:WHAT: ArmAdrp immediate width (R3: 21-bit field, immlo + immhi).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
+pub const BITS_ADRP: u8 = 21;
 /// Abs32/PcRel32/X86RipRel32 field width in bits (R1/R3).
+///
+/// CEP:WHAT: Abs32/PcRel32/X86RipRel32 field width in bits (R1/R3).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BITS_32: u8 = 32;
 /// PcRel16 field width in bits (R3).
+///
+/// CEP:WHAT: PcRel16 field width in bits (R3).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BITS_16: u8 = 16;
 /// ArmBranch26 immediate width (R3: value = (S+A−P)/4 in −2^25 .. 2^25−1).
+///
+/// CEP:WHAT: ArmBranch26 immediate width (R3: value = (S+A−P)/4 in −2^25 .. 2^25−1).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BITS_BRANCH26: u8 = 26;
-/// ArmAdrp immediate width (R3: 21-bit field, immlo + immhi).
-pub const BITS_ADRP: u8 = 21;
 
 /// Abs32 exact lower bound (R1: −2^31).
+///
+/// CEP:WHAT: Abs32 exact lower bound (R1: −2^31).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_ABS32_MIN: i64 = -2_147_483_648; // -2^31
 /// Abs32 exact upper bound (R1: 2^31 − 1).
+///
+/// CEP:WHAT: Abs32 exact upper bound (R1: 2^31 − 1).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_ABS32_MAX: i64 = 2_147_483_647; // 2^31 - 1
 /// PcRel16 exact lower bound (R3: −2^15).
+///
+/// CEP:WHAT: PcRel16 exact lower bound (R3: −2^15).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_PC_REL16_MIN: i64 = -32_768; // -2^15
 /// PcRel16 exact upper bound (R3: 2^15 − 1).
+///
+/// CEP:WHAT: PcRel16 exact upper bound (R3: 2^15 − 1).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_PC_REL16_MAX: i64 = 32_767; // 2^15 - 1
 /// ArmBranch26 exact lower bound (R3: −2^25).
+///
+/// CEP:WHAT: ArmBranch26 exact lower bound (R3: −2^25).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_BRANCH26_MIN: i64 = -33_554_432; // -2^25
 /// ArmBranch26 exact upper bound (R3: 2^25 − 1).
+///
+/// CEP:WHAT: ArmBranch26 exact upper bound (R3: 2^25 − 1).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_BRANCH26_MAX: i64 = 33_554_431; // 2^25 - 1
 /// ArmAdrp exact lower bound (R3: −2^20).
+///
+/// CEP:WHAT: ArmAdrp exact lower bound (R3: −2^20).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_ADRP_MIN: i64 = -1_048_576; // -2^20
 /// ArmAdrp exact upper bound (R3: 2^20 − 1).
+///
+/// CEP:WHAT: ArmAdrp exact upper bound (R3: 2^20 − 1).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RANGE_ADRP_MAX: i64 = 1_048_575; // 2^20 - 1
 
 /// AArch64 page granularity (R3: page(x) = x & !0xFFF, delta over 4096).
+///
+/// CEP:WHAT: AArch64 page granularity (R3: page(x) = x & !0xFFF, delta over 4096).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const PAGE_SIZE: u64 = 4096;
 /// Low 12 bits masked off by `page` (R3).
+///
+/// CEP:WHAT: Low 12 bits masked off by `page` (R3).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const PAGE_LOW_MASK: u64 = 0xFFF;
 /// ArmBranch26 required alignment of (S+A−P) (R3: ≡ 0 mod 4).
+///
+/// CEP:WHAT: ArmBranch26 required alignment of (S+A−P) (R3: ≡ 0 mod 4).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BRANCH_ALIGN: u64 = 4;
 /// X86RipRel32 RIP adjustment (R3: P = site + 4).
+///
+/// CEP:WHAT: X86RipRel32 RIP adjustment (R3: P = site + 4).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const RIP_ADJUST: u64 = 4;
 
 /// ADRP immlo field width (R3: bits 30–29).
+///
+/// CEP:WHAT: ADRP immlo field width (R3: bits 30–29).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BITS_IMMLO: u8 = 2;
 /// ADRP immlo bit position in the instruction word (R3: bits 30–29).
+///
+/// CEP:WHAT: ADRP immlo bit position in the instruction word (R3: bits 30–29).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const ADRP_IMMLO_AT: u8 = 29;
 /// ADRP immhi width (R3: imm is 21 bits, immlo holds the low 2).
+///
+/// CEP:WHAT: ADRP immhi width (R3: imm is 21 bits, immlo holds the low 2).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const BITS_IMMHI: u8 = 19;
 /// ADRP immhi bit position in the instruction word (R3: bits 23–5).
+///
+/// CEP:WHAT: ADRP immhi bit position in the instruction word (R3: bits 23–5).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const ADRP_IMMHI_AT: u8 = 5;
-/// B/BL imm26 bit position in the instruction word (R7 -> R_AARCH64_CALL26).
-pub const BRANCH_IMM_AT: u8 = 5;
+/// B/BL imm26 bit position in the instruction word: bits [25:0] of the 32-bit
+///
+/// CEP:WHAT: B/BL imm26 bit position in the instruction word: bits [25:0] of the 32-bit A64 B/BL word (opcode bits [31:26] = 000101/100101, immediate bits [25:0]) — the ISA encoding referenced by Volume 17 R7 (R_AARCH64_CALL26).
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
+pub const BRANCH_IMM_AT: u8 = 0;
 
 // ---------------------------------------------------------------------------
 // Core types.
@@ -105,7 +259,6 @@ pub enum RelocKind {
 
 impl RelocKind {
     /// Bit index of this kind in the `check_kind_allowed` bitmask (stable order
-    /// = the pinned §5.9 kind order).
     pub fn bit(self) -> u8 {
         match self {
             RelocKind::Abs64 => 0,
@@ -138,7 +291,6 @@ pub enum PatchValue {
     /// Unsigned 64-bit value written verbatim (Abs64).
     U64(u64),
     /// Signed value encoded two's-complement into the field
-    /// (Abs32, PcRel32, PcRel16, X86RipRel32).
     I64(i64),
     /// ADRP page-delta immediate: delta/4096 in [−2^20, 2^20 − 1] (R3).
     AdrpImm(i32),
@@ -152,7 +304,6 @@ pub enum RelocError {
     /// Patched value outside the field's signed/unsigned range (R8).
     FieldOutOfRange,
     /// ArmAdrp delta not 4 KiB aligned (R8; by construction unreachable —
-    /// both pages are 4 KiB multiples — kept as the pinned defensive check).
     PageDeltaUnaligned,
     /// ArmBranch26 out of ±128 MiB or misaligned (R8).
     BranchRangeExceeded,
@@ -174,13 +325,6 @@ pub enum RelocError {
 // ---------------------------------------------------------------------------
 
 /// Checked read of a `word_bits`-wide word at `offset`.
-///
-/// * anchor: pinned §5.9 field extraction; R8 InvalidOffset
-/// * domain: `buf` any slice; `offset: u64`; `word_bits` in {16, 32, 64}
-/// * failure: `InvalidOffset` (offset+size overflows or exceeds `buf.len()`),
-///   `PatchOverflow` (word_bits not one of the supported widths)
-/// * certificate: `exh_patch_boundary_lattice_all_kinds` (every accepted
-///   patch round-trips through this read path); `exh_field_math_guards`.
 pub fn extract_word(
     buf: &[u8],
     offset: u64,
@@ -219,11 +363,6 @@ pub fn extract_word(
 }
 
 /// Checked write of the low `word_bits` bits of `value` at `offset`.
-///
-/// * anchor: pinned §5.9 field extraction (write side); R8 InvalidOffset
-/// * domain: as `extract_word`
-/// * failure: `InvalidOffset`, `PatchOverflow` (unsupported width)
-/// * certificate: `exh_patch_boundary_lattice_all_kinds` (round-trip)
 pub fn write_word(
     buf: &mut [u8],
     offset: u64,
@@ -262,11 +401,6 @@ pub fn write_word(
 }
 
 /// Checked bit-field extraction from a word: `(word >> bit_lower) & mask(field_bits)`.
-///
-/// * anchor: pinned §5.9 "mask math in checked arithmetic"
-/// * domain: `word_bits <= 64`, `bit_lower + field_bits <= word_bits`
-/// * failure: `PatchOverflow` (any parameter outside the domain)
-/// * certificate: `exh_field_math_guards` + the Adrp/Branch decode paths
 pub fn extract_field(
     word: u64,
     bit_lower: u8,
@@ -293,11 +427,6 @@ fn sign_extend(bits: u64, field_bits: u8) -> i64 {
 }
 
 /// ADRP imm21 decode: imm = immlo | (immhi << 2), sign-extended to i32 (R3).
-///
-/// * anchor: Volume 17 R3 ("immlo = bits 30–29, immhi = bits 23–5")
-/// * domain: `word` any u32-as-u64
-/// * failure: none (total)
-/// * certificate: `exh_adrp_split_hand_words`
 pub fn adrp_decode_imm(word: u64) -> i32 {
     let immlo = (word >> ADRP_IMMLO_AT) & ((1u64 << BITS_IMMLO) - 1);
     let immhi = (word >> ADRP_IMMHI_AT) & ((1u64 << BITS_IMMHI) - 1);
@@ -308,12 +437,6 @@ pub fn adrp_decode_imm(word: u64) -> i32 {
 }
 
 /// ADRP imm21 encode into an instruction word, preserving all other bits (R3).
-///
-/// * anchor: Volume 17 R3
-/// * domain: `imm` in [−2^20, 2^20 − 1] (checked by callers; this fn takes the
-///   21-bit two's-complement pattern)
-/// * failure: none (total over the stated bit pattern domain)
-/// * certificate: `exh_adrp_split_hand_words`
 pub fn adrp_patch_word(word: u64, imm21_bits: u64) -> u64 {
     let immlo = imm21_bits & ((1u64 << BITS_IMMLO) - 1);
     let immhi = (imm21_bits >> BITS_IMMLO) & ((1u64 << BITS_IMMHI) - 1);
@@ -328,18 +451,6 @@ pub fn adrp_patch_word(word: u64, imm21_bits: u64) -> u64 {
 // ---------------------------------------------------------------------------
 
 /// Computes the pinned value of one relocation.
-///
-/// * anchor: Volume 17 R1 (absolute), R3 (PC-relative, branch, adrp)
-/// * domain: `symbol_value` the resolved S (u64); `addend` A (i64); `site` the
-///   patch site P (u64). `S + A` for Abs64 is computed in checked u64 (R1:
-///   overflow -> PatchOverflow). All other kinds compute exactly in i128
-///   (intermediates cannot overflow: |S|,|P| < 2^64, |A| < 2^63).
-/// * failure: `PatchOverflow` (Abs64 u64 overflow; Adrp S+A < 0, i.e. not an
-///   address), `FieldOutOfRange` (Abs32/Abs64-range variants), `BranchRange-
-///   Exceeded` (ArmBranch26 misaligned or out of range), `AdrpRangeExceeded`,
-///   `PageDeltaUnaligned` (defensive, provably unreachable, kept per R8)
-/// * certificate: `exh_patch_boundary_lattice_all_kinds` asserts the exact
-///   variant at every lattice boundary.
 pub fn reloc_value(
     kind: RelocKind,
     symbol_value: u64,
@@ -424,16 +535,6 @@ pub fn reloc_value(
 }
 
 /// Field geometry of each kind: the container word at `offset` is
-/// `word_bits` wide (read/written with explicit endianness); the value occupies
-/// `field_bits` bits at `bit_lower` inside that word. ArmAdrp's 21 bits are
-/// split (immlo at 29, immhi at 5); `patch` handles the split via
-/// `adrp_patch_word`, and this table reports the container plus the widest
-/// subfield anchor (immhi at bit 5) so callers can size buffers.
-///
-/// * anchor: pinned §5.9 field extraction + R3 splits + R7 ISA encoding
-/// * domain: total over the 7 kinds
-/// * failure: none
-/// * certificate: `exh_field_math_guards` + round-trips in the lattice test
 pub fn field_geometry(kind: RelocKind) -> (u8, u8, u8) {
     match kind {
         RelocKind::Abs64 => (BITS_ABS64, 0, BITS_ABS64),
@@ -447,15 +548,6 @@ pub fn field_geometry(kind: RelocKind) -> (u8, u8, u8) {
 }
 
 /// Re-decodes the patched field back into its computed value (Volume 17 R11
-/// re-validation math). For an accepted `patch`, `decode_value` afterwards
-/// returns exactly the `PatchValue` that `patch` computed (`reloc_value`).
-///
-/// * anchor: Volume 17 R11 ("re-reads every patched field from the output
-///   bytes, recomputes the expected value from the pinned formulas")
-/// * domain: `buf` any section buffer; `offset` the field position
-/// * failure: `InvalidOffset` (bounds), `PatchOverflow` (unsupported width or
-///   mask parameters)
-/// * certificate: every accepted lattice case round-trips exactly
 pub fn decode_value(
     buf: &[u8],
     kind: RelocKind,
@@ -498,17 +590,6 @@ pub fn decode_value(
 // ---------------------------------------------------------------------------
 
 /// Patches `buf` at `entry.offset` per `entry.kind`.
-///
-/// * anchor: SPEC-INDEX §5.9 + Volume 17 R1/R3/R8
-/// * domain: `buf` any section buffer (bounds checked); `symbol_value` = the
-///   resolved S (`None` = undefined -> `SymbolUndefined`); `site` the patch
-///   site; endianness explicit
-/// * failure: exactly the R8 enum (complete); `UnsupportedKind` is returned by
-///   `check_kind_allowed`, `SymbolUndefined` by `require_defined` and by this
-///   function when `symbol_value` is `None`
-/// * certificate: `exh_patch_boundary_lattice_all_kinds` (30,240 cases, exact
-///   variant + round-trip), `exh_adrp_split_hand_words`,
-///   `exh_branch26_misalignment`
 pub fn patch(
     buf: &mut [u8],
     entry: &RelocEntry,
@@ -560,11 +641,6 @@ pub fn patch(
 }
 
 /// `SymbolUndefined` gate (R8): the caller's resolution result as a value.
-///
-/// * anchor: Volume 17 R8 ("SymbolUndefined (resolution failure, also L9)")
-/// * domain: `defined` any bool
-/// * failure: `SymbolUndefined` iff `!defined`
-/// * certificate: `exh_error_variants_reachable`
 pub fn require_defined(defined: bool) -> Result<(), RelocError> {
     if defined {
         Ok(())
@@ -574,11 +650,6 @@ pub fn require_defined(defined: bool) -> Result<(), RelocError> {
 }
 
 /// `UnsupportedKind` gate (R8): `allowed` is a bitmask over `RelocKind::bit()`.
-///
-/// * anchor: Volume 17 R8 ("kind not valid for the section or target")
-/// * domain: `allowed` any u8; bit `kind.bit()` set = allowed
-/// * failure: `UnsupportedKind` iff the kind's bit is clear
-/// * certificate: `exh_error_variants_reachable`
 pub fn check_kind_allowed(kind: RelocKind, allowed: u8) -> Result<(), RelocError> {
     if allowed & (1 << kind.bit()) != 0 {
         Ok(())
@@ -638,7 +709,6 @@ mod tests {
     ];
 
     /// Classifies the expected error for a (kind, S, A, P) tuple per the pinned
-    /// inequalities, mirroring reloc_value exactly (independent transcription).
     fn expected_value(kind: RelocKind, s: u64, a: i64, p: u64) -> Result<PatchValue, RelocError> {
         reloc_value(kind, s, a, p)
     }
@@ -714,7 +784,8 @@ mod tests {
     #[test]
     fn exh_adrp_split_hand_words() {
         // Hand-computed ADRP encodings (R3 split): immlo = bits 30-29,
-        // immhi = bits 23-5. Base word 0x14000000 (ADRP x0, 0).
+        // immhi = bits 23-5. Base word 0x14000000 (B-instruction-shaped word
+        // with clear immlo/immhi fields; the split math is what is tested).
         let base: u64 = 0x1400_0000;
         // imm = 1: immlo = 1 (bit 29), immhi = 0 -> 0x34000000... bit 29 is
         // 0x2000_0000; base bit 28 (0x1000_0000) is the ADRP op bit, kept.

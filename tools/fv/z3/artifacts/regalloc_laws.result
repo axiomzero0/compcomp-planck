@@ -1,22 +1,24 @@
 CEP:FILE: tools/fv/z3/artifacts/regalloc_laws.result
-CEP:WHAT: Z3 verification artifact for the register-allocation law obligation (SPEC-INDEX 5.8 laws on the bounded instance class; G4/G5 correctness, G18 independence).
+CEP:WHAT: Z3 verification artifact for the register-allocation law obligation (SPEC-INDEX 5.8 laws on a concrete bounded instance; G4/G5 correctness, G18 independence).
 CEP:WHY: Independently checkable proof artifact (verification standards G15, G18); the same laws the Rust EXH tests discharge are re-checked by a second engine per CEP-DR-01 section 1 rule 5 until the trusted proof checker (OB-DR-5) exists.
 CEP:STATUS: complete
 CEP:FAILURE: Regenerate with the pinned z3 version if the problem or the pinned SMT script changes; any outcome other than sat/sat/unsat marks the obligation unproven (build fails per SPEC-INDEX section 4 rule 2).
-CEP:ASSUMES: Z3 pinned at version 5.4.1 (64-bit); script tools/fv/z3/regalloc_laws.smt2; instance and bounds documented in the script header.
-CEP:COST: bounded check; strict timeout 10 s (documented per CEP&CC 54.5.2; no wall-clock ambiguity: the script is linear and completes far inside the bound).
+CEP:ASSUMES: Z3 pinned at version 5.4.1 (64-bit); script tools/fv/z3/regalloc_laws.smt2; instance and bounds documented in the script header (HALF-OPEN interference per SPEC-INDEX 5.8; coalescible pair {0,1} in both directions).
+CEP:COST: bounded check; strict timeout 10 s (set via (set-option :timeout 10000) in the script and documented per CEP&CC 54.5.2).
 CEP:EVIDENCE: this file; script tools/fv/z3/regalloc_laws.smt2.
 CEP:SECURITY: repository-trusted input.
 
 OBLIGATION: regalloc_laws (SPEC-INDEX 5.8 two laws: exactly-one-location; no-two-interfering-share)
 PROBLEM: /home/z/my-project/compcomp-planck/tools/fv/z3/regalloc_laws.smt2
+INSTANCE: intervals {0:[0,3), 1:[1,5), 2:[2,4), 3:[3,6), 4:[4,5)}, coalescible pair {0,1} (both directions), register class order {0,1,2,3}; half-open interference = {0-2, 1-2, 1-3, 1-4, 2-3, 3-4}
 PART 1 EXPECTED: sat (laws satisfiable on the bounded instance)
 PART 1 OUTCOME: sat
-PART 2 EXPECTED: sat (allocator First-Fit output is a model of the laws)
+PART 2 EXPECTED: sat (the kernel's actual First-Fit output — verified by direct probe of planck-regalloc-math allocate() on this exact instance: vreg0->reg0, vreg1->reg0, vreg2->reg1, vreg3->reg2, vreg4->reg1; assigned=5, spilled=0, pressure=3 — is a model of the laws)
 PART 2 OUTCOME: sat
 PART 3 EXPECTED: unsat (1 register, 2 interfering intervals: law non-vacuous, spill required)
 PART 3 OUTCOME: unsat
-BOUND: bounded instance (5 intervals, 4 registers, 6-point grid), strict timeout 10 s
+BOUND: bounded concrete instance (5 intervals, 4 registers, 6-point grid), strict timeout 10 s
 STATUS: pass
 Z3_VERSION: 5.4.1 (64-bit)
+KERNEL_PROBE: planck-regalloc-math allocate() on the exact instance (documented above) agrees with PART 2's asserted model
 DATE: 2026-11-19

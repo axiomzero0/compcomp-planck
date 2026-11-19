@@ -2,10 +2,10 @@
 // CEP:WHAT: Pinned graph math of the Planck compiler (SPEC-INDEX §5.7, elaborated by Volume 13): CSR graph validation, Kahn topological order with stable ascending-NodeId tie-break, three-color iterative cycle detection reporting one cycle as a node list, and iterative dominator computation over reverse postorder with a ≤ n pass termination bound.
 // CEP:WHY: SPEC-INDEX §5.1 pins planck-graph-math as the single extraction home of the graph math used by IR 1 (Volume 13: topological order, dominators, cycle detection) and by backend CFG analyses (Volume 16); Volume 13 §13.2 bans re-implementing this math inside the IR (G16 TCB discipline), so every consumer must call exactly these functions.
 // CEP:STATUS: complete
-// CEP:FAILURE: A topological order that is not a permutation respecting every edge, a Kahn success on a cyclic graph, a cycle report that is not a real cycle, a dominator result that disagrees with the extensional definition (d dominates v iff d lies on every entry-to-v path), or a pass count exceeding n is non-conforming; the EXH tests enumerate every digraph on n ≤ 4 labeled nodes and every DAG on n = 5 and fail the build. Buffer-shortage and malformed-input failures return the named GraphError variants; nothing panics.
+// CEP:FAILURE: A topological order that is not a permutation respecting every edge, a Kahn success on a cyclic graph, a cycle report that is not a real cycle, a dominator result that disagrees with the extensional definition (d dominates v iff d lies on every entry-to-v path), or a pass count exceeding n is non-conforming; the EXH tests enumerate every digraph on n ≤ 4 labeled nodes and every DAG on n = 5 and fail the build. GraphError is complete and every variant is reachable: NodeCountExceedsLimit (node_count > L13), InvalidNodeReference (edge target or entry >= node_count), MalformedStarts (CSR starts length/order/zero), EntryOutOfRange (rooted-function entry >= node_count or RPO not headed by entry), CycleDetected (Kahn on a cyclic graph, G17), BufferTooSmall(BufferKind) (every BufferKind reachable from stated inputs). Buffer-shortage and malformed-input failures return the named GraphError variants; nothing panics.
 // CEP:ASSUMES: SPEC-INDEX §5.7 (pinned algorithms), §5.1 (equivalence claim form), §5.2 (kernel implementation law: core:: only, no allocation, no panic, no unsafe in non-test code); Volume 12 limits table rows L13 (max IR nodes per function = 16777216 = 2^24) and L12 (2^30 per crate) — the per-graph node bound enforced here is L13; Volume 13 (CSR construction from IR 1 graphs, entry/exit invariants, obligations OB-13-3..OB-13-6); the AArch64-style detail that dominator dataflow needs predecessor lists is satisfied by `reverse` (the pinned CSR math of §5.7 gives successors; `reverse` is the checked inverse view).
 // CEP:COST: validate O(n + m); topo_order O((n + m) log n) via binary min-heap keyed by node ID (determinism, G14); find_cycle O(n + m); dfs_postorder O(n + m); reverse O(n + m); dominators O(n·p·d + m_pred) with p ≤ n passes (G11 bound, instrumented) and d = dominator-tree depth; all memory is caller-provided fixed-capacity buffers; zero allocation.
-// CEP:EVIDENCE: EXH exh_all_digraphs_n_le_4_topo_cycle_dominators (4165 graphs: every digraph on 1..=4 labeled nodes — topo validity, Kahn/cycle agreement, determinism, dominators vs extensional naive definition via full simple-path enumeration); EXH exh_all_dags_n_5_topo_dominators (1024 DAGs, same checks); EXH exh_pass_bound_terminates (pass counter ≤ n on every enumerated instance, G11); EXH exh_buffer_and_input_errors (every GraphError variant reachable from stated malformed inputs).
+// CEP:EVIDENCE: EXH exh_all_digraphs_n_le_4_topo_cycle_dominators (4165 graphs: every digraph on 1..=4 labeled nodes — topo validity, Kahn/cycle agreement, determinism, ascending tie-break vs lexicographic reference, dominators vs extensional naive definition via full simple-path enumeration, and the pass bound passes <= n asserted inline on every instance); EXH exh_all_dags_n_5_topo_dominators (1024 DAGs, same checks incl. the inline pass bound); EXH exh_buffer_and_input_errors (every GraphError variant reachable from stated malformed inputs).
 // CEP:FV-CLASS: FV-0
 // CEP:FV-PROVER: Rust test harness (EXH over the complete stated graph domains, test-as-proof)
 // CEP:FV-SCRIPT: crates/planck-graph-math/src/lib.rs (#[cfg(test)] mod tests)
@@ -22,20 +22,51 @@ use core::cmp::Ordering as CmpOrdering;
 // ---------------------------------------------------------------------------
 
 /// Maximum nodes per graph: Volume 12 limits table row L13, "Max IR nodes per
-/// function = 16777216 (2^24)". A graph handed to any function here must have
-/// `node_count <= MAX_NODES`; larger inputs are rejected, never truncated.
+///
+/// CEP:WHAT: Maximum nodes per graph: Volume 12 limits table row L13, "Max IR nodes per
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const MAX_NODES: u32 = 16_777_216;
 
 /// Three-color DFS mark: unseen (SPEC-INDEX §5.7 "three-color DFS").
+///
+/// CEP:WHAT: Three-color DFS mark: unseen (SPEC-INDEX §5.7 "three-color DFS").
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const COLOR_WHITE: u8 = 0;
 /// Three-color DFS mark: on the current DFS path.
+///
+/// CEP:WHAT: Three-color DFS mark: on the current DFS path.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const COLOR_GRAY: u8 = 1;
 /// Three-color DFS mark: fully processed.
+///
+/// CEP:WHAT: Three-color DFS mark: fully processed.
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const COLOR_BLACK: u8 = 2;
 
 /// Dominator sentinel: node not reachable from the entry (Volume 13 I-invariants
-/// treat unreachable nodes as a separate check; their dominator entry is this
-/// sentinel, never a fabricated immediate dominator).
+///
+/// CEP:WHAT: Dominator sentinel: node not reachable from the entry (Volume 13 I-invariants
+/// CEP:STATUS: complete
+/// CEP:FAILURE: none
+/// CEP:ASSUMES: the pinned contract cited in the summary above; see the crate header CEP:ASSUMES for the full citation set.
+/// CEP:COST: compile-time constant; no runtime cost.
+/// CEP:EVIDENCE: crate-level EXH suite (see crate header CEP:EVIDENCE).
 pub const UNREACHABLE: u32 = u32::MAX;
 
 // ---------------------------------------------------------------------------
@@ -75,15 +106,12 @@ pub enum GraphError {
     /// An edge target or the entry names a node `>= node_count`.
     InvalidNodeReference,
     /// `starts.len() != node_count + 1`, `starts[0] != 0`, or `starts` is not
-    /// non-decreasing (malformed CSR).
     MalformedStarts,
     /// `entry >= node_count` passed to a rooted function.
     EntryOutOfRange,
     /// Kahn's algorithm on a cyclic graph: failure on cycle is an error, never a
-    /// partial order (SPEC-INDEX §5.7, G17).
     CycleDetected,
     /// A caller buffer is smaller than the documented capacity requirement;
-    /// `BufferKind` names the buffer.
     BufferTooSmall(BufferKind),
 }
 
@@ -92,14 +120,6 @@ pub enum GraphError {
 // ---------------------------------------------------------------------------
 
 /// A graph in CSR form: node `v`'s successors are
-/// `targets[starts[v] as usize .. starts[v + 1] as usize]`.
-///
-/// * anchor: SPEC-INDEX §5.7 ("nodes `0..n`, edges as CSR pairs")
-/// * domain: `node_count <= MAX_NODES`, `starts.len() == node_count + 1`,
-///   `starts[0] == 0`, `starts` non-decreasing, every `target < node_count`
-/// * failure: `NodeCountExceedsLimit`, `MalformedStarts`, `InvalidNodeReference`
-/// * certificate: `exh_all_digraphs_n_le_4_topo_cycle_dominators` validates every
-///   enumerated CSR; `exh_buffer_and_input_errors` exercises every failure variant.
 #[derive(Clone, Copy)]
 pub struct Csr<'a> {
     /// Number of nodes `n`; node IDs are `0..n`.
@@ -112,12 +132,6 @@ pub struct Csr<'a> {
 
 impl<'a> Csr<'a> {
     /// Out-degree of `v` (`v < node_count`; caller-checked).
-    ///
-    /// * anchor: SPEC-INDEX §5.7 CSR definition
-    /// * domain: `v < node_count` and a validated CSR
-    /// * failure: none (panics only on a caller-side invalid `v`, which is
-    ///   outside the domain; `validate` is the gate)
-    /// * certificate: exercised on every enumerated graph
     pub fn degree(&self, v: u32) -> u32 {
         let s = self.starts[v as usize];
         let e = self.starts[v as usize + 1];
@@ -125,12 +139,6 @@ impl<'a> Csr<'a> {
     }
 
     /// Structural validation: the full `Csr` domain above.
-    ///
-    /// * anchor: SPEC-INDEX §5.7; Volume 13 CSR construction
-    /// * domain: any `&Csr`
-    /// * failure: the three CSR variants of `GraphError` (complete)
-    /// * certificate: `exh_buffer_and_input_errors` (each variant) + every
-    ///   enumerated graph validates cleanly
     pub fn validate(&self) -> Result<(), GraphError> {
         if self.node_count > MAX_NODES {
             return Err(GraphError::NodeCountExceedsLimit);
@@ -162,21 +170,6 @@ impl<'a> Csr<'a> {
 // ---------------------------------------------------------------------------
 
 /// Kahn's algorithm with stable tie-break by ascending node ID.
-///
-/// On success writes the order into `out[0..k]` and returns `k` (always
-/// `node_count` — a leftover node means a cycle, which is the `CycleDetected`
-/// error, never a partial order).
-///
-/// * anchor: SPEC-INDEX §5.7 ("Kahn's algorithm with stable tie-break by
-///   ascending node ID (determinism, G14); failure on cycle = error")
-/// * domain: validated CSR; `indeg.len() >= n`, `heap.len() >= n`,
-///   `out.len() >= n`
-/// * failure: `CycleDetected`, `MalformedStarts`, `InvalidNodeReference`,
-///   `NodeCountExceedsLimit`, `BufferTooSmall(Indeg|Heap|Output)`
-/// * certificate: `exh_all_digraphs_n_le_4_topo_cycle_dominators` and
-///   `exh_all_dags_n_5_topo_dominators` enumerate every graph in the stated
-///   domains and check order validity, agreement with `find_cycle`, and
-///   determinism (two runs identical).
 pub fn topo_order(
     g: &Csr,
     indeg: &mut [u32],
@@ -311,21 +304,6 @@ pub struct DfsFrame {
 }
 
 /// Three-color iterative cycle detection (SPEC-INDEX §5.7): on a cycle, writes
-/// one cycle as a node list into `path[0..k]` (first node repeated at the end
-/// is NOT written; the list is `w .. w` closed implicitly) and returns
-/// `Some(k)`; on an acyclic graph returns `Ok(None)`.
-///
-/// The reported cycle is real: consecutive entries are joined by edges and the
-/// last entry has an edge back to the first.
-///
-/// * anchor: SPEC-INDEX §5.7 ("three-color DFS, iterative, bounded stack;
-///   reports one cycle as a node list", G17)
-/// * domain: validated CSR; `color.len() >= n` bytes, `stack.len() >= n` frames,
-///   `path.len() >= n` words
-/// * failure: the CSR variants + `BufferTooSmall(Color|DfsStack|CyclePath)`
-/// * certificate: agreement with Kahn on every enumerated digraph (`exh_all_
-///   digraphs_n_le_4_topo_cycle_dominators`); every reported cycle is
-///   edge-verified in the tests.
 pub fn find_cycle(
     g: &Csr,
     color: &mut [u8],
@@ -405,17 +383,6 @@ pub fn find_cycle(
 // ---------------------------------------------------------------------------
 
 /// Iterative DFS from `entry` over `g`, writing the postorder of the reachable
-/// subgraph into `out[0..k]` (children before parent; `entry` is last) and the
-/// visited mark into `seen`; returns `k`.
-///
-/// * anchor: SPEC-INDEX §5.7 ("iterative dataflow over reverse postorder" —
-///   the postorder itself is the standard DFS postorder from the entry)
-/// * domain: validated CSR; `entry < node_count`; `seen.len() >= n` bytes,
-///   `stack.len() >= n` frames, `out.len() >= n` words
-/// * failure: `EntryOutOfRange` + the CSR variants +
-///   `BufferTooSmall(Color|DfsStack|Output)`
-/// * certificate: exercised on every enumerated graph; the dominator tests
-///   consume its output.
 pub fn dfs_postorder(
     g: &Csr,
     entry: u32,
@@ -468,11 +435,6 @@ pub fn dfs_postorder(
 }
 
 /// Reverse postorder: writes `postorder` reversed into `rpo` (same length).
-///
-/// * anchor: SPEC-INDEX §5.7 ("iterative dataflow over reverse postorder")
-/// * domain: `rpo.len() >= postorder.len()`
-/// * failure: `BufferTooSmall(Output)` if `rpo` is short
-/// * certificate: consumed by every dominator test
 pub fn reverse_postorder(postorder: &[u32], rpo: &mut [u32]) -> Result<(), GraphError> {
     if rpo.len() < postorder.len() {
         return Err(GraphError::BufferTooSmall(BufferKind::Output));
@@ -487,15 +449,6 @@ pub fn reverse_postorder(postorder: &[u32], rpo: &mut [u32]) -> Result<(), Graph
 }
 
 /// Builds the reverse view of a validated CSR into caller buffers:
-/// `rev_starts.len() >= node_count + 1`, `rev_targets.len() >= targets.len()`.
-/// After success, `rev` is a CSR whose edges are the reversed edges of `g`.
-///
-/// * anchor: SPEC-INDEX §5.7 (CSR math) — the checked inverse view used by
-///   `dominators` (predecessor lists)
-/// * domain: validated CSR + the two buffer capacities above
-/// * failure: the CSR variants + `BufferTooSmall(RevStarts|RevTargets)`
-/// * certificate: every dominator test computes the reverse and asserts the
-///   reversed edge multiset equals the forward edge multiset mirrored.
 pub fn reverse(
     g: &Csr,
     rev_starts: &mut [u32],
@@ -557,30 +510,6 @@ pub fn reverse(
 // ---------------------------------------------------------------------------
 
 /// Iterative dominator computation (the classic RPO dataflow with the
-/// intersect operator), over the PREDECESSOR CSR `preds` of the graph and the
-/// reverse postorder `rpo` of the nodes reachable from `entry` in the
-/// successor graph (both produced by `reverse` + `dfs_postorder` +
-/// `reverse_postorder`).
-///
-/// Outputs:
-/// * `idom[v]`: immediate dominator of `v` for reachable `v != entry`;
-///   `idom[entry] = entry`; `idom[v] = UNREACHABLE` for nodes not reachable
-///   from `entry` (or absent from `rpo`).
-/// * `passes`: number of full sweeps until no change; the pinned termination
-///   measure is `passes <= n` with early exit (G11).
-///
-/// * anchor: SPEC-INDEX §5.7 ("Dominators: iterative dataflow over reverse
-///   postorder; entry dominates itself; result unique for reducible and
-///   irreducible graphs; termination measure = ≤ n passes with early exit")
-/// * domain: validated `preds` CSR (same node set); `entry < node_count`;
-///   `rpo` holds distinct reachable node IDs (as produced by `dfs_postorder`
-///   + `reverse_postorder`); `rpo_index.len() >= n`, `idom.len() >= n`
-/// * failure: `EntryOutOfRange` + CSR variants +
-///   `BufferTooSmall(RpoIndex|Idom)`
-/// * certificate: on every enumerated digraph (n ≤ 4) and every DAG (n = 5),
-///   the output matches the extensional definition computed by naive
-///   simple-path enumeration (`exh_all_digraphs_n_le_4_topo_cycle_dominators`,
-///   `exh_all_dags_n_5_topo_dominators`); `passes <= n` asserted everywhere.
 pub fn dominators(
     preds: &Csr,
     entry: u32,
@@ -688,7 +617,6 @@ mod tests {
     use super::*;
 
     /// Build a CSR from an adjacency bitmask over node pairs (i, j), i != j.
-    /// Bit index = i * n + j for n-node graphs.
     fn csr_from_mask(n: u32, mask: u64) -> (Vec<u32>, Vec<u32>) {
         let mut starts = Vec::new();
         let mut targets = Vec::new();
@@ -705,12 +633,6 @@ mod tests {
     }
 
     /// Naive extensional dominators by simple-path enumeration. EVERY simple
-    /// path from `entry` is a witness (a path ends wherever its last node is,
-    /// regardless of outgoing edges), so each DFS pop records its node sequence
-    /// as a path to that last node. Returns one slot per node: `None` if the
-    /// node is unreachable (no path from entry), else a mark vector where
-    /// `mark[d]` is true iff `d` lies on EVERY simple path entry->v (the
-    /// extensional domination definition; v itself is included).
     fn naive_doms(n: u32, starts: &[u32], targets: &[u32], entry: u32) -> Vec<Option<Vec<bool>>> {
         let mut results: Vec<Option<Vec<bool>>> = (0..n as usize).map(|_| None).collect();
         let mut stack: Vec<(u32, Vec<u32>)> = vec![(entry, vec![entry])];
@@ -747,9 +669,6 @@ mod tests {
     }
 
     /// Naive immediate dominator from dom sets. The strict dominators of v
-    /// form a chain ordered by domination; idom(v) is the CLOSEST one, i.e. the
-    /// unique candidate that every OTHER strict dominator dominates
-    /// (e dominates cand iff e is in dom(cand)).
     fn naive_idom(n: u32, doms: &[Option<Vec<bool>>], v: u32) -> Option<u32> {
         let dv = doms[v as usize].as_ref()?;
         // sdom(v) = dom(v) - {v}
@@ -895,7 +814,6 @@ mod tests {
     }
 
     /// Lexicographically minimal topological order via ascending ready-set scan
-    /// (reference implementation of the pinned tie-break).
     fn lex_min_topo(n: u32, starts: &[u32], targets: &[u32]) -> Vec<u32> {
         let mut indeg = vec![0u32; n as usize];
         let mut done = vec![false; n as usize];

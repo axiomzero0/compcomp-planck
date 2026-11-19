@@ -17,10 +17,20 @@
 (* Atoms and rows                                                      *)
 (* ------------------------------------------------------------------ *)
 
+(* implb and andb_prop live in the Bool library, not the auto-loaded
+   prelude (kernel-check finding, vote round 1). *)
+Require Import Bool.
+
+(* implb and andb_prop live in the Bool library, not the auto-loaded
+   prelude (kernel-check finding, vote round 1). *)
+Require Import Bool.
+
 (* The pinned canonical atom order: alloc < async < concurrency < ffi <
    io < nondet < panic < unsafe (Volume 07 §7.1). Bit i of a row is atom
-   i in this fixed order; the correspondence to planck-effect-math's bit
-   mapping is the crate's documented one. *)
+   i in THIS canonical order; this is deliberately distinct from
+   planck-effect-math's storage bit order (Volume 12 §12.1: bit0 io ...
+   bit7 nondet) — the proven laws are permutation-invariant, and the
+   crate documents the same distinction. *)
 
 Definition row := (bool * bool * bool * bool * bool * bool * bool * bool)%type.
 

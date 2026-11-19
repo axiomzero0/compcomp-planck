@@ -10,7 +10,7 @@
 // CEP:FV-PROVER: Rust test harness (EXH over the enumerated grid census + PROP) and Z3 5.4.1 (tools/fv/z3/regalloc_laws.smt2, self-contained SMT-LIB2)
 // CEP:FV-SCRIPT: crates/planck-regalloc-math/src/lib.rs (#[cfg(test)] mod tests); tools/fv/z3/regalloc_laws.smt2; artifact tools/fv/z3/artifacts/regalloc_laws.result
 // CEP:FV-SORRY-COUNT: 0
-// CEP:FV-REFINEMENT: FV-1 with bounded-instance gap, stated exactly: the pinned laws are machine-checked EXH-style over ALL interval multisets of size ≤ 5 on the 6-point grid (start/end ∈ 0..=5, 724,942 allocate() instances in total across the two censuses), Z3-style symbolically over the 8-interval/4-register class with arbitrary overlap and directional coalescence relations, and PROP-style over 5,000 deterministic instances of ≤ 64 intervals. Beyond those bounds (larger interval counts, wider position grids, richer constraint systems) the laws are not machine-checked here; the runtime bridge is the RA15 allocation verifier (Volume 16 §16.4 RA15), which re-checks both laws (V1 exactly-one-location, V2 no-two-interfering-share) on every compilation before the backend proceeds. spill_priority itself is FV-0 over the OB-16-6 corner domain (complete) with the stated bound gap beyond {uses ≤ 2^20, depth ≤ 64, size ≤ 64}.
+// CEP:FV-REFINEMENT: FV-1 with bounded-instance gap, stated exactly: the pinned laws are machine-checked EXH-style over ALL interval multisets of size ≤ 5 on the 6-point grid (start/end ∈ 0..=5, 724,942 allocate() instances in total across the two censuses), Z3 on a concrete bounded instance from that census (5 intervals, 4 registers, half-open interference relation) plus a 1-register non-vacuity case, and PROP-style over 5,000 deterministic instances of ≤ 64 intervals. Beyond those bounds (larger interval counts, wider position grids, richer constraint systems) the laws are not machine-checked here; the runtime bridge is the RA15 allocation verifier (Volume 16 §16.4 RA15), which re-checks both laws (V1 exactly-one-location, V2 no-two-interfering-share) on every compilation before the backend proceeds. spill_priority itself is FV-0 over the OB-16-6 corner domain (complete) with the stated bound gap beyond {uses ≤ 2^20, depth ≤ 64, size ≤ 64}.
 // CEP:FV-AXIOMS: none
 
 #![cfg_attr(not(test), no_std)]
@@ -334,9 +334,10 @@ pub fn coalescible(table: &[CoalescePair], a: LiveInterval, b: LiveInterval) -> 
 /// semantics on the §5.8 domain (`start ≤ end` per interval).
 /// Failure set: none (pure predicate).
 /// Certificate: EXH `exh_interference_formula_cases` (incl. the asymmetric case
-/// and degenerate intervals); Z3 `regalloc_laws.smt2` defines the same composed
-/// relation symbolically over 28 pairs; full census + PROP assert the two laws
-/// through this predicate.
+/// and degenerate intervals); Z3 `regalloc_laws.smt2` checks the composed
+/// laws on a concrete bounded instance (5 intervals, 4 registers, half-open
+/// interference from this census) plus a 1-register non-vacuity case; full
+/// census + PROP assert the two laws through this predicate.
 ///
 /// CEP:WHAT: Pinned interference = overlap ∧ ¬(coal(a→b) ∧ coal(b→a)).
 /// CEP:WHY: This is the exact relation over which both pinned allocation laws and the RA6 coloring are defined.
@@ -576,7 +577,7 @@ fn interfere_idx(
 /// every accepted output; totality asserted for non-fixed inputs) + EXH
 /// `exh_fixed_intervals_spill_paths` (26,222 fixed-interval instances covering
 /// the Ok and SpillImpossible arms) + Z3 `regalloc_laws.smt2` (no-conflict law
-/// over the symbolic 8-interval/4-register class) + PROP
+/// on the concrete bounded instance + 1-register non-vacuity case) + PROP
 /// `prop_laws_larger_instances` (5,000 instances ≤ 64 intervals, paired per
 /// SPEC-INDEX §4.3). Runtime bridge beyond the FV bounds: RA15 verifier.
 ///

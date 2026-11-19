@@ -32,7 +32,7 @@ Every definition in this library satisfies all of the following:
 5. **No sorry analogues.** No `todo!()`, `unimplemented!()`, `unreachable!()` (unless proven impossible and documented per standards.md §25.3.1), no admitted obligations, no obligation rows marked "later". If a property cannot be discharged, it is stated as a named refinement gap with a runtime bridge, per §54.2.2 (class FV-1) — never omitted.
 6. **Coverage ledger.** Every volume file ends with a coverage ledger: one row per design.md bullet in its scope, quoting the bullet (abbreviated) and naming the section in the volume where it is defined. The ledger is the completeness instrument; an absent row is a missing definition.
 7. **Feature template.** Language features use the 16-row template of design.md §40. Optimization passes use the 10-row template of design.md §40. A row that does not apply states "not applicable because …"; it is never silently omitted.
-8. **Doc structure.** Component-definition subsections follow `doc standards.md` §3: Abstract, Formal Definitions (with Rust signatures), Algorithm (with complexity), Invariants, Integration Points, Known Limitations.
+8. **Doc structure.** Component-definition subsections follow `doc standards.md` §3: Abstract, Formal Definitions (with Rust signatures), Algorithm (with complexity), Invariants, Integration Points, Known Limitations. Structure correspondence (fixed by vote round 1, V2 finding 6): the volumes realize this structure as — Abstract ≙ the volume's `CEP:WHAT` + section overview; Formal Definitions ≙ the definition bullets `d1..dn` of each component section, with the Rust signatures carried by the kernel extraction home named in the volume's kernel-extraction table (`math/crates/...`), which is where §3.3's signature requirement is discharged; Algorithm ≙ the section's algorithm subsection with stated complexity; Invariants ≙ the invariant list (e.g. Volume 13 I1–I12); Integration Points ≙ the section's cross-volume reference block; Known Limitations ≙ the volume's stated-limitations rows and refinement gaps. Every element of doc standards §3 therefore has exactly one realized home in each volume; an element with no realized home is a doc-structure defect.
 9. **No deletion.** Definitions extend and refine design.md; they never drop a design.md item. A design bullet judged wrong is still defined, with the definition and the consequence stated normatively.
 
 ## 2. The 26 volumes
@@ -95,6 +95,8 @@ Reviewed: 26 / 26.
    - `EXH`: exhaustive test over the full finite input domain stated in the obligation (test-as-proof; the domain statement is part of the obligation).
    - `PROP`: property test with deterministic PRNG over a stated sampling domain; must be paired with either Z3 or EXH for the same property, or an explicit refinement gap.
    - `REVIEW`: reviewer-checkable argument for properties outside mechanical reach; must name the invariant and the reason it is not machine-checkable.
+   - `ROCQ` (added by CEP-DR-01 rule DR-1.5): constructive proof kernel-checked by the pinned Rocq version; the row must name the exact version, the file under `rocq/`, and the compiled `.vo` check command.
+   - `DIF` (added by CEP-DR-01 rule DR-1.5): differential equivalence — execution of the artifact under test against the hand-written `math/` kernel reference over a stated domain, paired with EXH or Z3 per the pairing rule above; used for untrusted extraction output (CEP-DR-01 §4 layer 2).
 3. Class per §54: FV-0 (machine-checked, zero gaps), FV-1 (bounded with documented gap + runtime bridge), FV-2 (verification tooling).
 4. `math/` crates carry `CEP:FV-*` comment fields exactly per §54.7.1 and the `CEP:` block per §10.2.
 5. G-mapping: each verification matrix names the G-goals it serves (G1 semantic preservation, G2 memory safety, G3 type soundness, G4/G5 pass equivalence, G11 termination, G13/G14 determinism and limits, G15 matrix completeness, G16 TCB, G17 counterexamples, G18 independence, G21 concurrency, G22 diagnostics, G26 evolution).
@@ -202,11 +204,49 @@ math/                       Rust workspace (no_std kernels)
   Cargo.toml                workspace manifest, members, profile
   crates/<crate>/           one crate per §5.1 row
 tools/fv/                   Z3 obligation scripts (FV-1/FV-0 artifacts)
+rocq/                       Rocq foundation layer (CEP-DR-01 DR-7.4):
+                            proofs, pinned-version file, build.sh;
+                            subset-report and rustc-assumptions land here
+                            as OB-DR-2/OB-DR-4 artifacts
 ```
 
 design.md is not modified by this pass (nothing may be removed from it). The review counter it contains ("0 / 26 reviewed") is superseded by the table in §2 above.
 
-## 7. Review status
+## 7. Implementation dependency order and completion gates (defines design.md §41–§42)
+
+Added by the vote-round-1 completeness fix (V1 findings 1–2): design.md §41 and §42 must have a definition home. This section is it. design.md is retained byte-for-byte; the quoted rows below are defined, never replaced.
+
+### 7.1 Implementation dependency order (defines design.md §41)
+
+design.md §41 recommends writing the specification in dependency order, "not implementation convenience", and fixes an 8-step development sequence. The normative definition:
+
+- DO-1 (definition home): the Master Specification Library is written and revised in exactly this order: (1) foundation and semantic definitions = Volumes 01–10; (2) frontend and compiler infrastructure = Volumes 11–12; (3) first IR and verifier = Volume 13; (4) optimization architecture = Volume 14; (5) machine backend = Volumes 15–17; (6) runtime and standard library = Volumes 18–19; (7) production toolchain = Volumes 20–21; (8) correctness and production maturity = Volumes 22–26.
+- DO-2 (verification obligation, G15): the coverage ledger of each volume must cite the DO-1 phase it belongs to; a volume revision that moves a definition out of its phase order must state the dependency it breaks.
+- DO-3 (scope boundary, quoting design.md §41 by the letter): this is "the dependency order for specifications, not a rule that all implementation must occur sequentially. Some implementation work can proceed in parallel once its interfaces and invariants have been defined."
+
+### 7.2 Completion gates (defines design.md §42)
+
+design.md §42 fixes 11 production-completion gates. Each gate is a milestone with a required result; the gate is open until the result is machine-checkable or review-checkable per the volume that owns it, and the owning volume's verification matrix must carry one row per gate it owns (G15). Gate ownership and required results:
+
+| Gate | Required result (design.md §42, verbatim) | Owner volume | Gate evidence |
+| ---- | ----------------------------------------- | ------------ | ------------- |
+| Language definition complete | Every stabilized construct has normative semantics | 01–10 | coverage ledgers complete for the stabilized surface (G15, G19) |
+| Frontend complete | Valid programs receive complete semantic validation | 11–12 | Volume 11/12 verification matrices |
+| Borrow checker complete | Ownership and lifetime invariants enforced | 06 | Volume 06 matrix + `planck-ownership-math` certificates |
+| IR 1 complete | Typed, effect-aware graph construction and verification | 13 | Volume 13 matrix + `planck-graph-math` certificates |
+| IR 2 complete | Representation transformations verified | 14 | Volume 14 matrix (G4/G5) |
+| Backend complete | Correct executable generation for supported targets | 15–17 | Volume 15–17 matrices + `planck-regalloc-math`/`planck-reloc-math` certificates |
+| Runtime complete | Hosted and/or freestanding execution contracts work | 18 | Volume 18 matrix (G20) |
+| Standard library complete | Foundational APIs are usable and documented | 19 | Volume 19 matrix |
+| Toolchain complete | Build, debug, test, format, and package workflows work | 20–21 | Volume 20/21 matrices |
+| Validation complete | Conformance, fuzzing, regression, and differential suites established | 22 | Volume 22 matrix |
+| Production ready | Release, security, compatibility, and maintenance processes established | 24–25 | Volume 24/25 matrices |
+
+- CG-1 (gate discipline, quoting design.md §42 by the letter): "A compiler can be usable before every milestone is complete. But it should not claim support for a feature until its semantics and implementation are actually covered." A feature claim without its gate evidence is non-conforming.
+- CG-2 (bootstrap relation): the stage-0/stage-1 bootstrap chain of §3 (bootstrap trust model) is evidence for the "Backend complete" and "Production ready" gates (G25).
+
+## 8. Review status
+
 
 - Definition pass: 26 / 26 volumes defined (see §2).
 - Math extraction: 8 crates in `math/`, certificates per §5.1.
