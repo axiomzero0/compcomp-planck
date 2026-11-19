@@ -252,4 +252,4 @@ design.md §42 fixes 11 production-completion gates. Each gate is a milestone wi
 - Math extraction: 8 crates in `math/`, certificates per §5.1.
 - FV artifacts: `tools/fv/` scripts with documented timeouts.
 - Toolchain decision: CEP-DR-01 (Rocq + Peregrine + MATP) recorded and integrated; OB-DR-1..5 all open.
-- Five-agent vote: recorded in `spec/VOTE-RECORD.md` after the vote completes; the vote scope is the 26 volumes + SPEC-INDEX + CEP-DR-01.
+- Five-agent vote: **5/5 COMPLETE_AND_OPTIMAL** (round 3, unanimous; rounds 1-2 drove the fixes). Scope: 26 volumes + SPEC-INDEX + CEP-DR-01 + math crates + FV artifacts + Rocq scaffold. Record: `spec/VOTE-RECORD.md`.

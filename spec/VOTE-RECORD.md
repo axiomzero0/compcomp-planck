@@ -1,0 +1,73 @@
+# Planck Master Specification Library — Five-Agent Vote Record
+
+CEP:FILE: spec/VOTE-RECORD.md
+CEP:WHAT: The binding record of the five-agent vote on the completeness and optimality of the Planck definition pass (scope: the 26 spec volumes + SPEC-INDEX + CEP-DR-01 + the math kernel crates + FV artifacts + the Rocq scaffold), per the standing requirement that five agents all vote the definitions complete and optimal; three rounds were run (round 1: 1/5 pass, 4 defect reports; round 2: 3/5; round 3: 5/5 unanimous).
+CEP:WHY: SPEC-INDEX §8 (review status) requires this record after the vote completes; the standing instruction ("you have to have 5 agents all vote that it is complete and optimal; do not get rid of anything because it is too complicated, or out of scope") makes 5/5 the acceptance bar, and "YOU ARE HELD TO STANDARDS,, BY THE LETTER" makes CEP&CC 0.4 the lens of the conformance agent.
+CEP:STATUS: complete
+CEP:FAILURE: A future revision that contradicts a recorded resolution here without updating this record is non-conforming; the record is the completeness-and-optimality acceptance instrument for the definition pass.
+CEP:ASSUMES: standards.md (CEP&CC 0.4); verification standards.md G1–G26; doc standards.md; design.md (byte-retained, verified by DR-7.3 check); SPEC-INDEX §0–§8; spec/CEP-DR-01-rocq-peregrine-toolchain.md; the vote agents review only and run builds/tests where mandated.
+CEP:COST: document; the vote cost 13 agent reviews across 3 rounds (5 + 4 + 2 re-votes) plus the fix commits listed below.
+CEP:EVIDENCE: the per-round tables below; fix commits 40cd30b (definition pass), fb4f042 (kernel extraction), b58ac40 (Rocq scaffold), 950d4e6 (round-1 fixes), fb02879 + b8fbaaf (round-2 fixes); test logs 94/94 release and debug at b8fbaaf.
+CEP:SECURITY: repository-trusted inputs.
+
+---
+
+## 1. Vote lenses (five distinct mandates, per the standing requirement)
+
+| Agent | Lens | Mandate core |
+| ----- | ---- | ------------ |
+| V1 | Completeness | every design.md bullet has exactly one normative definition home; coverage ledgers hold; exactness sweep (no banned-phrase governing normative content) |
+| V2 | Standards conformance | CEP&CC by the letter: CEP block field sets on every public item, complete error enums with variant lists in CEP:FAILURE, no_std law, placeholder scan, doc-standards structure |
+| V3 | Mathematical soundness | kernels implement the pinned contracts exactly (effect lattice, ownership machine, operator table, graph algorithms, regalloc, relocation ranges); certificates genuinely enumerate their stated domains |
+| V4 | Toolchain integration & extraction feasibility | CEP-DR-01 faithfully encodes the Rocq + Peregrine + MATP decision and the four qualification points as OB-DR-1..4; layered TCB coherent; no contradiction across the library; Peregrine facts site-grounded |
+| V5 | Verification integrity | artifacts support their claims: tests pass in both profiles, EXH domain arithmetic matches loops, MATP/Z3 artifacts consistent with scripts, no phantom evidence, gap discipline holds |
+
+## 2. Round 1 (initial vote)
+
+| Agent | Verdict | Blocking findings (summary) |
+| ----- | ------- | --------------------------- |
+| V1 | DEFECT | design.md §41 (dependency order) and §42 (11 completion gates) had no definition home (SPEC-INDEX §2 mapped only §1–§39); 1 exactness hit (volume-16 EM10 "as needed") |
+| V2 | DEFECT | graph-math 0/17 and reloc-math 0/40 public items carried CEP blocks; GraphError/RelocError variant lists not in CEP:FAILURE; volume-06 §6.12 cited nonexistent artifacts; doc-standards §3 structure correspondence unstated |
+| V3 | DEFECT | **planck-reloc-math ArmBranch26 imm26 placed at bits [30:5] — impossible for the A64 B/BL encoding (opcode [31:26], imm26 [25:0]); overwrote opcode bits**; Z3 script used closed-interval semantics and asserted a First-Fit model the kernel does not produce; graph evidence line named a nonexistent test |
+| V4 | COMPLETE_AND_OPTIMAL | none blocking (7 non-blocking observations: RowAlgebra.v missing `Require Import Bool`; SPEC-INDEX §4/§6 sync; volume-22 TCB enumeration stale vs amended §3 + MAPT typo; rust-toolchain.toml dangling ref; cross-ref imprecision; DIF method formalization; bit-order sentence) |
+| V5 | DEFECT | MATP artifacts: 10/14 STATUS fail (6 honestly mirrored, 4 ownership fails undisclosed outside tools/fv/); driver evidence line false ("one per obligation, STATUS: pass"); stale orphan artifact; regalloc Z3 claim overstated; graph phantom test name; charclass mask-test domain misstated (128 vs 256); Z3 timeout documented not enforced; volume-16 OB-16-5 stale artifact path |
+
+Round-1 score: **1/5 COMPLETE_AND_OPTIMAL.** All defects fixed in commit 950d4e6.
+
+## 3. Round 2 (re-vote of the four defect lenses)
+
+| Agent | Verdict | Notes |
+| ----- | ------- | ----- |
+| V1 | COMPLETE_AND_OPTIMAL | both §41/§42 homes verified 11/11 verbatim, DO-1..DO-3 + CG-1/CG-2 exact; exactness sweep clean (0 governing hits); ledgers unchanged |
+| V2 | DEFECT | the round-1 fix converter had silently DELETED fn/type doc blocks instead of converting them (graph 5/17, reloc 22/40 — consts only) and truncated multi-line summaries; variant docs cut; artifact-existence and variant-enumeration checks from round 1 all passed |
+| V3 | COMPLETE_AND_OPTIMAL | BRANCH_IMM_AT=0 verified against the A64 encoding; half-open interference re-derived independently (6 pairs, exact); kernel probe confirmed the Z3 part-2 model; 94/94 both profiles; census arithmetic re-verified (4,165 + 1,024 graphs; 30,240 lattice; 698,720 instances); round-1 findings 2/3 fixed; observation adopted: placement-sensitive hand-word test recommended |
+| V5 | DEFECT | two residuals: regalloc crate-level CEP:EVIDENCE still carried the "8 intervals symbolic" parenthetical (line 8; the FV-REFINEMENT and doc comments were fixed but the header line was missed); volume-16 OB-16-5 Method column still the uninstantiated envelope; exh_-name sweep otherwise clean (0 phantom) |
+
+Round-2 score: **3/5.** Residual fixes in commits fb02879 and b8fbaaf (full doc-block reconstruction: 17/17 and 40/40 real CEP coverage; variant docs restored; junk tails removed; exh_branch26_hand_words added, tests 93→94; regalloc EVIDENCE tail and OB-16-5 Method column right-sized; volume-06 duplicated phrase fixed).
+
+## 4. Round 3 (re-vote of the two residual lenses)
+
+| Agent | Verdict | Notes |
+| ----- | ------- | ----- |
+| V2 | COMPLETE_AND_OPTIMAL | 17/17 and 40/40 verified programmatically (102 + 240 field lines, full 6-field sets); 0 truncation, 0 junk tails; scans clean |
+| V5 | COMPLETE_AND_OPTIMAL | residuals (a)/(b) fixed and verified against the actual script; 94/94 both profiles; Z3 sat/sat/unsat reproduced with hand-re-derived kernel model; 0 phantom evidence across all 8 crates; MATP set 1:1 with driver obligations, no regression |
+
+Round-3 score: **5/5 COMPLETE_AND_OPTIMAL — the vote passes unanimously.**
+
+## 5. Resolutions and standing decisions recorded by the vote
+
+1. VR-1: design.md §41 is defined by SPEC-INDEX §7.1 (DO-1..DO-3); design.md §42 by SPEC-INDEX §7.2 (11-gate table with owner volumes, CG-1..CG-2). The DO-2 per-ledger phase annotation is binding on each volume's next revision (round-2 V1 residual, kept open deliberately — a one-annotation pass per ledger, not a definition change).
+2. VR-2: ArmBranch26's imm26 field is bits [25:0] of the A64 B/BL word (opcode [31:26] = 000101/100101), pinned in `planck-reloc-math` (BRANCH_IMM_AT = 0) and cited through R7 → R_AARCH64_CALL26; the placement-sensitive certificate is exh_branch26_hand_words (round-2 V3 observation adopted as a test).
+3. VR-3: the Z3 regalloc artifact's instance is the concrete bounded one (5 intervals, 4 registers, half-open interference {0-2, 1-2, 1-3, 1-4, 2-3, 3-4}, coalescible {0,1} both directions) and its part-2 model is the kernel's actual First-Fit output, verified by direct probe; the OB-16-5 Method column carries exactly that envelope.
+4. VR-4: MATP artifacts record actual outcomes (never rewritten to pass); obligations that MATP could not close are discharged by full-domain EXH per SPEC-INDEX §4, with the attempt disclosure carried in the crate that owns the obligation (effect-math mirrors the 6 GaveUp records; ownership-math discloses the 3 Saturated-no-refutation records).
+5. VR-5: the doc-standards §3 structure correspondence is stated in SPEC-INDEX §1 rule 8 (Abstract ≙ CEP:WHAT + overview; Formal Definitions ≙ d-bullets + kernel-extraction Rust signatures; Algorithm ≙ algorithm subsections; Invariants ≙ invariant lists; Integration Points ≙ cross-volume blocks; Known Limitations ≙ stated-limitations rows + refinement gaps); doc standards.md itself is byte-identical.
+6. VR-6: the item-level CEP:WHY calibration follows the exemplar's own precedent (planck-charclass omits WHY on some items); all 57 graph/reloc public items carry the full 6-field set.
+7. VR-7 (non-blocking, kept on record for the next revision cycle): (a) three passing EXH tests are not cited in any CEP:EVIDENCE token (charclass exh_comment_introducer_byte_is_0x2f; operator-math exh_column_domains_and_accessor_agreement, exh_lookuperror_is_complete_single_variant) — cite on next touch; (b) the spec library's verification matrices reference ~200 planned tools/fv/ artifact paths that do not exist yet — planned-artifact paths, to be marked as such or implemented per the volume's own matrix; (c) volume-22 §22.13 TCB enumeration is revised at its next revision per DR-7.2 (amendment pointer already in place); (d) DO-2 ledger annotations per VR-1.
+
+## 6. Final state at acceptance
+
+- Definition pass: 26/26 volumes + SPEC-INDEX + CEP-DR-01 + VOTE-RECORD (this file); design.md byte-retained.
+- Math extraction: 8/8 kernel crates, 94 tests green in release AND debug (overflow-checks on); certificates: EXH domains verified to the case by the soundness agent (4,165 + 1,024 graphs; 917,532 ownership cells; 698,720 + 26,222 regalloc instances; 30,240 reloc lattice cases; 16,563 lookup probes; 256-row effect lattice; 524,288 leq-characterization points; 66,430 unification cases; 981,640 token cases).
+- FV artifacts: 13 MATP results (4 pass, 9 honest fail-with-disclosure, all pinned at MATP 677bea9) + 1 Z3 result (pass, Z3 5.4.1, sat/sat/unsat) + 1 Rust placement test.
+- Rocq scaffold: Effect/RowAlgebra.v (pinned laws proven by exhaustive 256-row case analysis, no Admitted/Axiom; kernel check pending first pinned build per CEP-DR-01 §6 policy).
+- Toolchain: Rocq (foundation, bootstrapping) + Peregrine (first extraction route, untrusted until OB-DR-1..4) + MATP (complementary FO prover, pinned) — the user's decision, integrated and gated.
