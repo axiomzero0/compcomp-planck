@@ -1,7 +1,7 @@
 # CEP:FILE: rocq/README.md
 # CEP:WHAT: Build and pin procedure for the Rocq foundation layer (CEP-DR-01 DR-1.2, DR-1.5, DR-7.4): directory map, version pinning, kernel-check commands, and the integration rule with the obligation matrix.
 # CEP:WHY: CEP-DR-01 section 1 rule 5 requires every ROCQ obligation row to name the exact Rocq version, the file under rocq/, and the compiled .vo check command; this README is the procedure those rows cite.
-# CEP:STATUS: partial — the layer is bootstrapping: Effect/RowAlgebra.v is written (kernel check pending); the version pin lands at the first successful build.
+# CEP:STATUS: complete for Effect/RowAlgebra.v — kernel-checked and independently coqchk-verified at the first pinned build (Coq 8.20.1, pin recorded in CEP-DR-01 §6). The layer keeps growing per DO-1 order; new .v files must pass build.sh before any ROCQ row may cite them.
 # CEP:FAILURE: A ROCQ obligation row that cites an unpinned version or an unbuilt .vo is non-conforming.
 # CEP:ASSUMES: CEP-DR-01 (toolchain decision, pinned-version policy §6); SPEC-INDEX §4 (method ROCQ added by DR-1.5); the Rocq standard library only (no external packages) until Peregrine integration (OB-DR-1..4).
 # CEP:COST: build-time only.
@@ -25,16 +25,19 @@ cd rocq
 
 `build.sh`:
 
-1. Prints the exact version string of `rocq` (or `coqc` on older installs).
-   That string is the CEP-DR-01 §6 pin; record it in `Effect/PIN.v`-style
-   comment and in the decision record's table (§6, row Rocq).
-2. Compiles every `.v` under `rocq/` (one `_CoqProject` listing, `rocq make`
-   or `coq_makefile`).
+1. Prints the exact version string of `rocq` (or `coqc` on older installs)
+   and asserts it against the CEP-DR-01 §6 pin (the pin lives in the decision
+   record's table, §6, row Rocq; pin drift exits 3).
+2. Compiles every `.v` under `rocq/` (sorted `find`, one compile invocation
+   each).
 3. A build with zero errors and zero warnings-as-errors is the kernel check;
    the `.vo` files are the evidence artifacts (DR-1.5).
 
-Until that first build succeeds, every file here carries CEP:STATUS partial
-and no ROCQ obligation row may cite it (CEP-DR-01 DR-1.5, by the letter).
+The first pinned build succeeded (Coq 8.20.1; pin recorded in CEP-DR-01 §6);
+`Effect/RowAlgebra.v` carries CEP:STATUS complete and the ROCQ evidence chain
+is live (kernel check + coqchk). New `.v` files join the check automatically
+on the next build; a ROCQ obligation row may cite a file only after build.sh
+passes with it present (CEP-DR-01 DR-1.5, by the letter).
 
 ## 3. Integration rules
 

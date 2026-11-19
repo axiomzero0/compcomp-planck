@@ -71,3 +71,23 @@ Round-3 score: **5/5 COMPLETE_AND_OPTIMAL — the vote passes unanimously.**
 - FV artifacts: 13 MATP results (4 pass, 9 honest fail-with-disclosure, all pinned at MATP 677bea9) + 1 Z3 result (pass, Z3 5.4.1, sat/sat/unsat) + 1 Rust placement test.
 - Rocq scaffold: Effect/RowAlgebra.v (pinned laws proven by exhaustive 256-row case analysis, no Admitted/Axiom; kernel check pending first pinned build per CEP-DR-01 §6 policy).
 - Toolchain: Rocq (foundation, bootstrapping) + Peregrine (first extraction route, untrusted until OB-DR-1..4) + MATP (complementary FO prover, pinned) — the user's decision, integrated and gated.
+
+## 7. Round 4 (mechanical extraction pass vote, 2026-11-19)
+
+Scope: the mechanical extraction pass — rewritten and kernel-checked `rocq/Effect/RowAlgebra.v` (first pinned build, Coq 8.20.1, coqchk zero axioms), the `tools/extractor` extraction instrument (FV-2), the separated generated tree `extract/planck_effect` with kernel ground truth, the DIF artifact `tools/fv/extract/artifacts/`, CEP-DR-01 §6 pin + §8 extraction-layer rules, and SPEC-INDEX §4/§6 amendments. Five lenses, five independent agent reviews, each reproducing the evidence chain itself.
+
+| Agent | Verdict | Notes |
+| ----- | ------- | ----- |
+| V1 | COMPLETE_AND_OPTIMAL | §8 defines homes for all six new mechanisms; CEP coverage verified on every new file; exactness sweep clean; dif/check/lint/build all reproduced |
+| V2 | COMPLETE_AND_OPTIMAL | complete 9-field CEP + 6-field FV sets on all new artifacts; pin string byte-matches build.sh stdout; no_std judgment: §5.2 scopes no_std to math/ only, extract/ references no std items anyway |
+| V3 | COMPLETE_AND_OPTIMAL | all 11 pinned law lemmas verified constructive (34 lemmas / 34 Qed / 0 admits); independent Python re-derivation matched the kernel oracle and ground truth 196,608/196,608; sha256 chain verified; shared-pinned-convention argument closed (generator emits both sides from one parsed width) |
+| V4 | COMPLETE_AND_OPTIMAL | DR-8 coherent with DR-1..7 and OB-DR gates; Peregrine stays untrusted and separate; extractor subset honestly pinned; effect-math EXH 37/37 as the pairing counterpart |
+| V5 | COMPLETE_AND_OPTIMAL | every claim reproduced; hand-edit ban VALIDATED by live drift probe (append comment → check fails exit 1 → byte-identical restore → check passes); no phantom evidence; git status matches the claim set exactly |
+
+Round-4 score: **5/5 COMPLETE_AND_OPTIMAL — the vote passes unanimously.**
+
+Resolutions and standing decisions recorded by this round:
+
+1. VR-8: the "kernel check pending" state of §6 is RESOLVED: the first pinned build is Coq 8.20.1 (CEP-DR-01 §6), kernel check + coqchk green, and CEP-DR-01 §8 records the extraction-layer execution discipline (DR-8.1..8.6).
+2. VR-9: the five lenses' non-blocking observations were adopted on the spot and fixed before the acceptance commit: literal `CEP:PROVENANCE:` field on every generated artifact (DR-8.2's own wording), the `2^{w}` template slip, build.sh now compiles EVERY .v under rocq/ (foundation file first) with a loud pin-drift assertion (exit 3), artifact STATUS form aligned to the z3/matp precedent (CEP:STATUS complete + body STATUS: pass), EXH pairing cross-cite added to the DIF artifact, artifact date derived from the run clock (no same-date overwrites), rocq/README.md §2 staleness fixed, .gitignore for regenerable build outputs, and rust-toolchain.toml pins added to tools/extractor and extract/planck_effect. The logical prefix is pinned as `-Q Effect Effect` (uniform Require path and coqchk module name `Effect.RowAlgebra`).
+3. VR-10 (kept open for the next revision cycle, non-blocking): (a) DIF coverage names row_join/row_meet/row_leq; the eight accessors rest on extractor correctness (FV-2) and are implicitly covered by the pointwise composition of the pinned functions — enumerate them explicitly if the extractor's role grows; (b) the pinned Gallina subset is boolean-algebra-only and states no extension procedure — a deliberate subset-extension record is required before integer-domain foundation kernels can extract; (c) CEP-LINT-STATUS vocabularies (cep.rs vs standards.md) should unify at the next standards touch; (d) unknown prelude identifiers fail late (cargo) rather than at parse — acceptable but a parse-time free-identifier check is the better shape.

@@ -96,7 +96,7 @@ Reviewed: 26 / 26.
    - `PROP`: property test with deterministic PRNG over a stated sampling domain; must be paired with either Z3 or EXH for the same property, or an explicit refinement gap.
    - `REVIEW`: reviewer-checkable argument for properties outside mechanical reach; must name the invariant and the reason it is not machine-checkable.
    - `ROCQ` (added by CEP-DR-01 rule DR-1.5): constructive proof kernel-checked by the pinned Rocq version; the row must name the exact version, the file under `rocq/`, and the compiled `.vo` check command.
-   - `DIF` (added by CEP-DR-01 rule DR-1.5): differential equivalence — execution of the artifact under test against the hand-written `math/` kernel reference over a stated domain, paired with EXH or Z3 per the pairing rule above; used for untrusted extraction output (CEP-DR-01 §4 layer 2).
+   - `DIF` (added by CEP-DR-01 rule DR-1.5): differential equivalence — execution of the artifact under test against the hand-written `math/` kernel reference over a stated domain, paired with EXH or Z3 per the pairing rule above; used for untrusted extraction output (CEP-DR-01 §4 layer 2). Instrument (CEP-DR-01 §8, DR-8.3): `tools/extractor dif` — the oracle is the Coq kernel itself (`vm_compute` ground truth over the complete finite domain via the generated `rocq/Effect/DifGroundTruth.v`), the artifact under test is the mechanically extracted Rust under `extract/`, and evidence lands in `tools/fv/extract/artifacts/`.
 3. Class per §54: FV-0 (machine-checked, zero gaps), FV-1 (bounded with documented gap + runtime bridge), FV-2 (verification tooling).
 4. `math/` crates carry `CEP:FV-*` comment fields exactly per §54.7.1 and the `CEP:` block per §10.2.
 5. G-mapping: each verification matrix names the G-goals it serves (G1 semantic preservation, G2 memory safety, G3 type soundness, G4/G5 pass equivalence, G11 termination, G13/G14 determinism and limits, G15 matrix completeness, G16 TCB, G17 counterexamples, G18 independence, G21 concurrency, G22 diagnostics, G26 evolution).
@@ -203,11 +203,20 @@ spec/                       26 volume files + this index
 math/                       Rust workspace (no_std kernels)
   Cargo.toml                workspace manifest, members, profile
   crates/<crate>/           one crate per §5.1 row
-tools/fv/                   Z3 obligation scripts (FV-1/FV-0 artifacts)
+tools/fv/                   Z3 obligation scripts (FV-1/FV-0 artifacts);
+                            extract/ artifacts record the DIF runs
+                            (tools/fv/extract/artifacts/, CEP-DR-01 §8)
 rocq/                       Rocq foundation layer (CEP-DR-01 DR-7.4):
                             proofs, pinned-version file, build.sh;
                             subset-report and rustc-assumptions land here
                             as OB-DR-2/OB-DR-4 artifacts
+tools/extractor/            planck-extractor: mechanical Gallina-subset ->
+                            Rust extractor (FV-2, CEP-DR-01 §8 DR-8.1);
+                            emits extract/ and the DIF kernel oracle
+extract/                    SEPARATED mechanically extracted Rust tree
+                            (CEP-DR-01 §8 DR-8.2); generated only,
+                            hand edits are non-conforming; carries the
+                            kernel ground truth it was verified against
 ```
 
 design.md is not modified by this pass (nothing may be removed from it). The review counter it contains ("0 / 26 reviewed") is superseded by the table in §2 above.

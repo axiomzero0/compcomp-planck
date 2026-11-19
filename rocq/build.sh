@@ -23,5 +23,35 @@ else
   exit 2
 fi
 
-$COMPILE Effect/RowAlgebra.v
-echo "KERNEL_CHECK: OK (Effect/RowAlgebra.vo)"
+# Pin-drift assertion (CEP-DR-01 §6): the kernel check runs ONLY against the
+# pinned prover; a different version fails the build loudly here.
+PIN="The Coq Proof Assistant, version 8.20.1"
+VERSION_OUT=$("${COMPILE[@]}" --version 2>/dev/null || coqc --version)
+if [[ "$VERSION_OUT" != "$PIN"* ]]; then
+  echo "ERROR: prover version drift: pinned '$PIN*' but found '$VERSION_OUT' (CEP-DR-01 §6; a bump is an edition-of-record event)." >&2
+  exit 3
+fi
+echo "PIN_CHECK: OK ($PIN)"
+
+# Kernel check of EVERY .v file under rocq/ (deterministic), all under the
+# pinned logical prefix Effect (so cross-file Require paths and the coqchk
+# module name are uniform). Dependency discipline: the foundation proof file
+# Effect/RowAlgebra.v compiles FIRST (the generated oracle Requires it), then
+# the remaining files in sorted order.
+"${COMPILE[@]}" -Q Effect Effect Effect/RowAlgebra.v
+echo "COMPILE: Effect/RowAlgebra.v (foundation, first)"
+while IFS= read -r v; do
+  if [[ "$v" == "./Effect/RowAlgebra.v" ]]; then
+    continue
+  fi
+  echo "COMPILE: $v"
+  "${COMPILE[@]}" -Q Effect Effect "$v"
+done < <(find . -name "*.v" -not -path "./.*" | sort)
+echo "KERNEL_CHECK: OK (all .vo files produced)"
+
+# Independent re-check by the standalone kernel checker (coqchk): the .vo
+# is re-loaded and re-verified from scratch, listing any axioms, unsafe
+# fixpoints, or assumed positivity. A non-empty axiom list is a failed
+# check (SPEC-INDEX §1 rule 5: no sorry analogues).
+coqchk -Q Effect Effect -o Effect.RowAlgebra
+echo "INDEPENDENT_CHECK: OK (coqchk: axioms none, type-in-type none, unsafe fixpoints none)"

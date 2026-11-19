@@ -1,0 +1,11 @@
+# CEP:FILE: extract/planck_effect/rust-toolchain.toml
+# CEP:WHAT: Deployment-layer rustc pin for this crate tree, matching math/rust-toolchain.toml (CEP-DR-01 §6, row rustc).
+# CEP:WHY: OB-DR-4 assumptions are stated against a pinned compiler; every Rust tree the compiler's code lives in shares the pin.
+# CEP:STATUS: complete
+# CEP:FAILURE: A build against a different rustc than this pin must regenerate the affected artifacts before acceptance.
+# CEP:ASSUMES: rustup-compatible toolchains.
+# CEP:COST: none.
+# CEP:EVIDENCE: math/rust-toolchain.toml (same pin).
+# CEP:SECURITY: repository-trusted input.
+[toolchain]
+channel = "1.100.0"

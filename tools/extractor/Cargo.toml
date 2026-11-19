@@ -1,0 +1,7 @@
+[package]
+name = "planck-extractor"
+version = "0.1.0"
+edition = "2021"
+description = "Mechanical Gallina-subset to Rust extractor for the Planck verified compiler (CEP-DR-01 extraction layer, FV-2 tooling). Generates the separated extract/ tree and the kernel ground-truth tables; never hand-edited output."
+
+[dependencies]
