@@ -17,7 +17,8 @@
 // CEP:FAILURE: Any disagreement with the kernel ground truth fails the DIF test; a hand edit is detected by planck-extractor check (regenerate + diff).
 // CEP:ASSUMES: the pinned Gallina subset; Rust 2021; the prelude mapping above (pinned in tools/extractor/src/emit.rs).
 // CEP:COST: runtime: O(1) per operation; build-time: cargo.
-// CEP:EVIDENCE: source sha256 97dd6c25c8cfd0d9ff3c4868214506aa3a28d3ad6d986c128525eaedd7885399; ground truth extract/planck_effect/ground_truth/*.txt (kernel vm_compute output, Coq 8.20.1); DIF artifacts under tools/fv/extract/artifacts/.
+// CEP:EVIDENCE: source sha256 97dd6c25c8cfd0d9ff3c4868214506aa3a28d3ad6d986c128525eaedd7885399; ground truth extract/planck_effect/ground_truth/*_table.rs (generated Rust source, kernel vm_compute output, Coq 8.20.1); DIF artifacts under tools/fv/extract/artifacts/.
+// CEP:SECURITY: repository-trusted inputs; generated mechanically — hand edits are non-conforming.
 // CEP:FV-CLASS: FV-0-equivalent-by-DIF (function-level equivalence over the complete finite domain; the extraction step itself is FV-2 tooling)
 // CEP:FV-PROVER: Coq 8.20.1 kernel (oracle for the DIF ground truth)
 // CEP:FV-SCRIPT: tools/extractor (extractor dif; cargo test in extract/planck_effect)

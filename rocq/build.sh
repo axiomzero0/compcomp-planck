@@ -52,6 +52,28 @@ echo "KERNEL_CHECK: OK (all .vo files produced)"
 # Independent re-check by the standalone kernel checker (coqchk): the .vo
 # is re-loaded and re-verified from scratch, listing any axioms, unsafe
 # fixpoints, or assumed positivity. A non-empty axiom list is a failed
-# check (SPEC-INDEX §1 rule 5: no sorry analogues).
-coqchk -Q Effect Effect -o Effect.RowAlgebra
-echo "INDEPENDENT_CHECK: OK (coqchk: axioms none, type-in-type none, unsafe fixpoints none)"
+# check (SPEC-INDEX §1 rule 5: no sorry analogues). The OK echoes below
+# are GATED on coqchk's actual output (V4 round-5 observation adopted:
+# the claim is parsed, not asserted).
+ROWCHK=$(coqchk -Q Effect Effect -o Effect.RowAlgebra 2>&1) || {
+  echo "ERROR: coqchk Effect.RowAlgebra failed:" >&2
+  printf '%s\n' "$ROWCHK" >&2
+  exit 4
+}
+if ! printf '%s\n' "$ROWCHK" | grep -q "Axioms: <none>"; then
+  echo "ERROR: coqchk Effect.RowAlgebra reported axioms (SPEC-INDEX §1 rule 5):" >&2
+  printf '%s\n' "$ROWCHK" >&2
+  exit 4
+fi
+echo "INDEPENDENT_CHECK: OK (RowAlgebra: axioms none, type-in-type none, unsafe fixpoints none)"
+CEPCHK=$(coqchk -Q Effect Effect -o Effect.CEP.CEPStandard 2>&1) || {
+  echo "ERROR: coqchk Effect.CEP.CEPStandard failed:" >&2
+  printf '%s\n' "$CEPCHK" >&2
+  exit 4
+}
+if ! printf '%s\n' "$CEPCHK" | grep -q "Axioms: <none>"; then
+  echo "ERROR: coqchk Effect.CEP.CEPStandard reported axioms (SPEC-INDEX §1 rule 5):" >&2
+  printf '%s\n' "$CEPCHK" >&2
+  exit 4
+fi
+echo "INDEPENDENT_CHECK: OK (CEPStandard: axioms none, type-in-type none, unsafe fixpoints none)"

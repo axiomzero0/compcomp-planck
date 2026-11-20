@@ -1,11 +1,12 @@
 // CEP:FILE: tools/extractor/src/dif.rs
-// CEP:WHAT: The DIF driver: regenerate-and-diff (check, enforcing the hand-edit ban), and the full differential run — kernel ground truth capture from vm_compute stdout, ground-truth files, cargo test in debug AND release, sha256-recorded artifact under tools/fv/extract/artifacts/.
+// CEP:WHAT: The DIF driver: regenerate-and-diff (check, enforcing the hand-edit ban and the DR-8.7 no-plain-text rule), and the full differential run — kernel ground truth capture from vm_compute stdout, ground-truth emission as generated Rust source, CEP lint of the proof layer, cargo test in debug AND release, sha256-recorded artifact under tools/fv/extract/artifacts/.
 // CEP:WHY: DR-1.5 method DIF requires execution against the kernel reference over a stated domain; this driver is the mechanical instrument, and the artifact it writes is the evidence chain (VR-4: outcomes are recorded as they happen, never rewritten).
 // CEP:STATUS: complete
 // CEP:FAILURE: Any kernel/Rust disagreement, size mismatch, or parse failure exits nonzero and writes no PASS artifact; a check drift exits nonzero before any run.
 // CEP:ASSUMES: coqc (pinned Coq 8.20.1) and cargo on PATH; bash for rocq/build.sh.
 // CEP:COST: kernel evaluation + cargo test build time.
 // CEP:EVIDENCE: tools/fv/extract/artifacts/*.md (sha256 of ground truth + results).
+// CEP:SECURITY: repository-trusted inputs; the migration step removes only files the pipeline itself superseded.
 // CEP:FV-CLASS: FV-2
 // CEP:FV-PROVER: Coq 8.20.1 kernel (oracle)
 // CEP:FV-SCRIPT: tools/extractor (extractor dif; extractor check)
@@ -150,7 +151,13 @@ pub fn generated_files(root: &Path, units: &[parse::ParseUnit]) -> Vec<(PathBuf,
         );
         out.push((dir.join("Cargo.toml"), cargo));
 
-        let test = emit::dif_test_source(&u.file, &sha, &ty_name, width);
+        let test = emit::dif_test_source(
+            &u.file,
+            &sha,
+            &ty_name,
+            width,
+            &gt::tabulated_functions(u),
+        );
         out.push((dir.join("tests").join("dif_effect.rs"), test));
 
         let gtv = gt::ground_truth_v(std::slice::from_ref(u));
@@ -172,14 +179,120 @@ pub fn check(root: &Path) -> Result<(), String> {
             drift.push(path.display().to_string());
         }
     }
-    if drift.is_empty() {
+    let failures: Vec<String> = drift
+        .into_iter()
+        .map(|p| format!("{} drifted from its mechanical provenance", p))
+        .collect();
+    check_ground_truth(root, &units)?;
+    if failures.is_empty() {
         Ok(())
     } else {
         Err(format!(
-            "HAND-EDIT BAN VIOLATION (CEP-DR-01 §4 layer 2): the following generated files drifted from their mechanical provenance — regenerate with `planck-extractor extract` and re-run `planck-extractor dif`:\n  {}",
-            drift.join("\n  ")
+            "HAND-EDIT BAN VIOLATION (CEP-DR-01 §4 layer 2): the following generated files are non-conforming — regenerate with `planck-extractor extract` and re-run `planck-extractor dif`:\n  {}",
+            failures.join("\n  ")
         ))
     }
+}
+
+/// DR-8.7 guard: ground truth under extract/ must be generated Rust source,
+/// never a plain-text dump. Legacy *.txt artifacts are a hard failure; every
+/// present *_table.rs must carry the GENERATED header + CEP:PROVENANCE and a
+/// const array with exactly 2^W x 2^W entries (value truth stays the DIF's
+/// job: the kernel vs Rust comparison is the equivalence gate itself).
+fn check_ground_truth(root: &Path, units: &[parse::ParseUnit]) -> Result<(), String> {
+    let gt_dir = root.join("extract/planck_effect/ground_truth");
+    if let Ok(rd) = std::fs::read_dir(&gt_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "txt").unwrap_or(false) {
+                return Err(format!(
+                    "DR-8.7 VIOLATION: legacy plain-text ground truth {} — extraction deliverables are Rust compilation units; run `planck-extractor dif` to regenerate as generated Rust source",
+                    p.display()
+                ));
+            }
+        }
+    }
+    let width = match units.iter().find_map(|u| u.row_type.as_ref().map(|(_, w)| *w)) {
+        Some(w) => w,
+        None => return Ok(()),
+    };
+    let total = (1usize << width) * (1usize << width);
+    for u in units {
+        let (row_fns, bool_fns) = gt::tabulated_functions(u);
+        for name in row_fns.iter().chain(bool_fns.iter()) {
+            let p = gt_dir.join(format!("{}_table.rs", name));
+            if !p.exists() {
+                continue; // dif has not run in this checkout yet
+            }
+            let text = std::fs::read_to_string(&p)
+                .map_err(|e| format!("{}: {}", p.display(), e))?;
+            // Byte-boundary tamper guards: nothing may precede the generated
+            // header or follow the const block. Value-level truth remains the
+            // DIF's job (kernel vs Rust) plus the per-run sha256 audit trail in
+            // the dated DIF artifact.
+            if !text.starts_with("// GENERATED FILE - DO NOT EDIT.") {
+                return Err(format!("{}: header tampered or missing (hand-edit ban)", p.display()));
+            }
+            if !text.contains("CEP:PROVENANCE:") {
+                return Err(format!("{}: missing CEP:PROVENANCE (DR-8.2)", p.display()));
+            }
+            if !text.trim_end().ends_with("];") {
+                return Err(format!(
+                    "{}: trailing content after the const block (hand-edit ban)",
+                    p.display()
+                ));
+            }
+            let decl = format!("pub const {}_TABLE: [", name.to_uppercase());
+            let arr = text
+                .find(&decl)
+                .ok_or_else(|| format!("{}: missing const declaration {}", p.display(), decl))?;
+            // Declared-length guard: the array's type must declare exactly
+            // 2^W x 2^W entries (V1/V5 defense-in-depth; a declared-length
+            // tamper is also caught by cargo at the include! site).
+            let type_seg_end = text[arr..]
+                .find(']')
+                .ok_or_else(|| format!("{}: malformed const", p.display()))?
+                + arr;
+            let type_seg = &text[arr + decl.len()..type_seg_end];
+            let declared: usize = type_seg
+                .split(';')
+                .nth(1)
+                .ok_or_else(|| format!("{}: missing declared length", p.display()))?
+                .trim()
+                .parse()
+                .map_err(|e| format!("{}: bad declared length: {}", p.display(), e))?;
+            if declared != total {
+                return Err(format!(
+                    "{}: declared length {}, expected {}",
+                    p.display(), declared, total
+                ));
+            }
+            let body_start = text[arr..]
+                .find("= [")
+                .ok_or_else(|| format!("{}: malformed const", p.display()))?
+                + arr
+                + 3;
+            let body_end = text[body_start..]
+                .find("];")
+                .ok_or_else(|| format!("{}: malformed const", p.display()))?
+                + body_start;
+            let count = text[body_start..body_end]
+                .split(',')
+                .filter(|t| !t.trim().is_empty())
+                .count();
+            if count != total {
+                return Err(format!(
+                    "{}: {} entries, expected {} (2^{} x 2^{}); value edits also fail the DIF",
+                    p.display(),
+                    count,
+                    total,
+                    width,
+                    width
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn check_exit(root: &Path) {
@@ -288,6 +401,20 @@ fn parse_list_nat(stdout: &str, nth: usize) -> Result<Vec<usize>, String> {
 }
 
 pub fn run(root: &Path) {
+    // 0. One-time migration (DR-8.7): remove superseded plain-text ground
+    //    truth mechanically — the pipeline supersedes its own legacy form;
+    //    no hand removal is involved. check's guard then verifies none remain.
+    let gt_dir0 = root.join("extract/planck_effect/ground_truth");
+    if let Ok(rd) = std::fs::read_dir(&gt_dir0) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "txt").unwrap_or(false) {
+                std::fs::remove_file(&p).expect("remove legacy txt ground truth (migration)");
+                println!("dif: migrated superseded plain-text ground truth out: {}", p.display());
+            }
+        }
+    }
+
     // 1. Enforce the hand-edit ban first: drift fails the run loudly.
     if let Err(e) = check(root) {
         eprintln!("ERROR: {}", e);
@@ -298,6 +425,14 @@ pub fn run(root: &Path) {
     let (so, se, ok) = run_capture(Command::new("bash").arg("build.sh").current_dir(root.join("rocq")));
     if !ok {
         eprintln!("ERROR: rocq/build.sh failed:\n{}\n{}", so, se);
+        std::process::exit(1);
+    }
+
+    // 2.5 CEP lint of the proof layer (DR-8.4 mechanical enforcement, in-pipeline).
+    let exe = std::env::current_exe().expect("current exe");
+    let (so, se, ok) = run_capture(Command::new(exe).arg("lint-cep").current_dir(root));
+    if !ok {
+        eprintln!("ERROR: lint-cep failed:\n{}\n{}", so, se);
         std::process::exit(1);
     }
 
@@ -399,14 +534,21 @@ pub fn run(root: &Path) {
         dump_i += 1;
     }
 
-    // 5. Write ground-truth files (one integer per line).
+    // 5. Write ground-truth tables as generated Rust source (DR-8.7): the
+    //    extraction deliverable form is a Rust compilation unit consumed by
+    //    the generated DIF test via include!, never a plain-text dump.
+    //    Legacy *.txt artifacts are removed mechanically (superseded form).
     let gt_dir = root.join("extract/planck_effect/ground_truth");
     std::fs::create_dir_all(&gt_dir).expect("mkdir ground_truth");
+    let src_rel = crate::ROOT_FILES[0];
+    let src_sha = {
+        let bytes = std::fs::read(root.join(src_rel)).expect("read source for sha");
+        sha256_hex(&bytes)
+    };
+    let width = parse_row_width(root);
+    let n = 1usize << width;
     let mut hashes = Vec::new();
     for (name, vals) in &tables {
-        // expected size: 2^W * 2^W — mechanical from the width of the row type
-        let width = parse_row_width(root);
-        let n = 1usize << width;
         if vals.len() != n * n {
             eprintln!(
                 "ERROR: table {} has {} entries, expected {}",
@@ -416,23 +558,17 @@ pub fn run(root: &Path) {
             );
             std::process::exit(1);
         }
-        let fname = match name.as_str() {
-            "row_join" => "row_algebra_join.txt",
-            "row_meet" => "row_algebra_meet.txt",
-            "row_leq" => "row_algebra_leq.txt",
-            other => {
-                eprintln!("ERROR: no ground-truth filename mapping for {}", other);
-                std::process::exit(1);
-            }
-        };
-        let text: String = vals
-            .iter()
-            .map(|v| format!("{}\n", v))
-            .collect::<Vec<_>>()
-            .join("");
+        let fname = format!("{}_table.rs", name);
+        let text = gt::ground_truth_rs(name, vals, src_rel, &src_sha, width);
         let h = sha256_hex(text.as_bytes());
-        hashes.push((fname, h, vals.len()));
-        std::fs::write(gt_dir.join(fname), &text).expect("write ground truth file");
+        hashes.push((fname.clone(), h, vals.len()));
+        std::fs::write(gt_dir.join(&fname), &text).expect("write ground truth rust source");
+    }
+    for entry in std::fs::read_dir(&gt_dir).expect("readdir ground_truth") {
+        let p = entry.expect("entry").path();
+        if p.extension().map(|x| x == "txt").unwrap_or(false) {
+            std::fs::remove_file(&p).expect("remove legacy txt ground truth");
+        }
     }
 
     // 6. cargo test in debug AND release (VR-4 discipline: both profiles).
@@ -460,7 +596,7 @@ pub fn run(root: &Path) {
         r#"# DIF artifact — extracted row functions vs Coq kernel (complete domain)
 
 CEP:FILE: tools/fv/extract/artifacts/dif-rowalgebra-{}.md
-CEP:WHAT: DIF differential-equivalence record: planck_effect extracted Rust vs kernel vm_compute ground truth over the complete 2^8 x 2^8 domain (65,536 pairs per function; join, meet, leq), in debug AND release.
+CEP:WHAT: DIF differential-equivalence record: planck_effect extracted Rust vs kernel vm_compute ground truth over the complete 2^8 x 2^8 domain (65,536 pairs per function; join, meet, leq), in debug AND release. Ground truth is emitted as generated Rust source under extract/planck_effect/ground_truth/ (DR-8.7: extraction deliverables are Rust compilation units, never plain-text dumps).
 CEP:WHY: CEP-DR-01 DR-1.5 method DIF; the standing standard requires mechanically extracted code proven equivalent under all workloads of its domain.
 CEP:STATUS: complete
 CEP:FAILURE: any mismatch would have failed the run and this artifact would record the failure instead.
@@ -468,7 +604,7 @@ CEP:FAILURE: any mismatch would have failed the run and this artifact would reco
 STATUS: pass
 CEP:ASSUMES: Coq 8.20.1 kernel (oracle); pinned index encoding; enumeration identical on both sides (single generator).
 CEP:COST: kernel evaluation + cargo test.
-CEP:EVIDENCE: the table below; ground truth files under extract/planck_effect/ground_truth/ (sha256 recorded); cargo test exit 0 in both profiles.
+CEP:EVIDENCE: the table below; ground truth under extract/planck_effect/ground_truth/ (generated Rust source, sha256 recorded); lint-cep exit 0; cargo test exit 0 in both profiles.
 CEP:SECURITY: repository-trusted inputs.
 
 ## Ground truth (kernel vm_compute, Coq 8.20.1)

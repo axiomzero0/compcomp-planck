@@ -5,7 +5,8 @@
 // CEP:FAILURE: A wrong enumeration or weight would mismatch the Rust side and fail the DIF; both sides are generated from the same parsed width and field order.
 // CEP:ASSUMES: the parsed row type (width W, all-bool tuple, canonical field order); functions with signature (row,row) -> row and (row,row) -> bool in the unit; Coq 8.20.1 list printing via Eval vm_compute.
 // CEP:COST: kernel evaluation time (vm_compute over 65,536 pairs per function).
-// CEP:EVIDENCE: rocq/Effect/DifGroundTruth.v (generated); captured stdout parsed into extract/planck_effect/ground_truth/*.txt.
+// CEP:EVIDENCE: rocq/Effect/DifGroundTruth.v (generated); captured stdout emitted as generated Rust source extract/planck_effect/ground_truth/*_table.rs (DR-8.7: extraction deliverables are Rust compilation units, never plain-text dumps).
+// CEP:SECURITY: repository-trusted inputs; emitted tables carry source sha256 provenance.
 // CEP:FV-CLASS: FV-2
 // CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute)
 // CEP:FV-SCRIPT: tools/extractor (extractor ground-truth; extractor dif)
@@ -39,12 +40,13 @@ fn weights(width: usize) -> Vec<usize> {
     (0..width).map(|k| 1usize << (width - 1 - k)).collect()
 }
 
-pub fn ground_truth_v(units: &[ParseUnit]) -> String {
-    let u = &units[0];
-    let (ty_name, width) = u.row_type.clone().expect("row type alias");
-
-    // Mechanically pick the functions to tabulate from their parsed signature:
-    // two row-typed binders; row-typed result -> index table; bool result -> b2n table.
+/// Mechanically pick the functions to tabulate from their parsed signature:
+/// two row-typed binders; row-typed result -> index table; bool result -> b2n
+/// table. Returns (row_fns, bool_fns) in definition order. Shared by the .v
+/// oracle generator, the Rust test emitter, and the check guard so all three
+/// derive the table set from one parsed source of truth.
+pub fn tabulated_functions(u: &ParseUnit) -> (Vec<String>, Vec<String>) {
+    let (ty_name, _width) = u.row_type.clone().expect("row type alias");
     let mut row_fns: Vec<String> = Vec::new();
     let mut bool_fns: Vec<String> = Vec::new();
     for d in &u.definitions {
@@ -68,6 +70,13 @@ pub fn ground_truth_v(units: &[ParseUnit]) -> String {
         eprintln!("ERROR: no (row,row)-arity functions found to tabulate");
         std::process::exit(1);
     }
+    (row_fns, bool_fns)
+}
+
+pub fn ground_truth_v(units: &[ParseUnit]) -> String {
+    let u = &units[0];
+    let (ty_name, width) = u.row_type.clone().expect("row type alias");
+    let (row_fns, bool_fns) = tabulated_functions(u);
 
     let ws = weights(width);
     // Build the row_index definition text from fst/snd chains (mechanical):
@@ -176,6 +185,88 @@ pub fn ground_truth_v(units: &[ParseUnit]) -> String {
         }
     }
     out
+}
+
+/// Generated Rust source for one kernel ground-truth table (DR-8.7): the
+/// extraction deliverable form is a Rust compilation unit — a `pub const`
+/// array included verbatim by the generated DIF test — never a plain-text
+/// dump. The entry type is chosen mechanically from the table maximum.
+pub fn ground_truth_rs(
+    fn_name: &str,
+    vals: &[usize],
+    source_rel: &str,
+    source_sha: &str,
+    width: usize,
+) -> String {
+    let n = 1usize << width;
+    let total = n * n;
+    assert_eq!(vals.len(), total, "ground truth table size");
+    let max = vals.iter().copied().max().unwrap_or(0);
+    let ty = if max <= 255 {
+        "u8"
+    } else if max <= 65535 {
+        "u16"
+    } else {
+        eprintln!(
+            "ERROR: table value {} exceeds the pinned u16 bound (widen the entry type rule in gt.rs)",
+            max
+        );
+        std::process::exit(1);
+    };
+    let const_name = format!("{}_TABLE", fn_name.to_uppercase());
+    let fname = format!("{}_table.rs", fn_name);
+    let mut body = String::new();
+    for (i, v) in vals.iter().enumerate() {
+        if i > 0 {
+            body.push_str(", ");
+            if i % 16 == 0 {
+                body.push_str("\n    ");
+            }
+        }
+        body.push_str(&v.to_string());
+    }
+    format!(
+        r"// GENERATED FILE - DO NOT EDIT.
+//
+// Generated mechanically by planck-extractor (dif) from the Coq kernel's
+// vm_compute output over the complete 2^{w} x 2^{w} domain. This is the
+// extraction deliverable form pinned by CEP-DR-01 §8 DR-8.7: kernel oracle
+// data is a compiled Rust source included by the DIF test harness — a
+// plain-text dump (.txt) is non-conforming as extraction output.
+// Hand edits are non-conforming: any value change fails the DIF loudly;
+// any format tamper fails cargo (include!) or `planck-extractor check`.
+// CEP:FILE: extract/planck_effect/ground_truth/{fname}
+// CEP:PROVENANCE: source {src} (sha256 {sha}); kernel oracle rocq/Effect/DifGroundTruth.v (vm_compute, Coq 8.20.1); extractor planck-extractor (dif); generated mechanically — hand edits are non-conforming (CEP-DR-01 §8 DR-8.2/DR-8.7).
+// CEP:WHAT: Kernel ground-truth table for {fnn} over the complete 2^{w} x 2^{w} domain (65,536 pairs), as compiled Rust const data consumed by the generated DIF test via include!.
+// CEP:WHY: CEP-DR-01 DR-1.5 method DIF requires the oracle to be the kernel itself; DR-8.7 requires every generated artifact under extract/ to be a Rust compilation unit — the oracle data therefore compiles into the test harness instead of being parsed from text at test time.
+// CEP:STATUS: complete (generated)
+// CEP:FAILURE: A value edit breaks equivalence and fails the DIF loudly; a format edit fails the cargo build or the planck-extractor check guard.
+// CEP:ASSUMES: kernel vm_compute output (Coq 8.20.1, pinned); index encoding bit W-1-k = field k; entries fit {ty} (mechanically chosen from the table maximum).
+// CEP:COST: compile-time only (const data in the test binary).
+// CEP:EVIDENCE: rocq/Effect/DifGroundTruth.v; DIF artifacts under tools/fv/extract/artifacts/ (sha256 of this file recorded per run).
+// CEP:SECURITY: repository-trusted inputs.
+// CEP:FV-CLASS: FV-2 (generated oracle data; qualified by the DIF it feeds)
+// CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute)
+// CEP:FV-SCRIPT: tools/extractor (extractor dif; extractor check)
+// CEP:FV-SORRY-COUNT: N/A
+// CEP:FV-REFINEMENT: complete-domain oracle data; no sampling.
+// CEP:FV-AXIOMS: none
+
+#[allow(non_upper_case_globals)]
+pub const {const_name}: [{ty}; {total}] = [
+    {body}
+];
+",
+        w = width,
+        fname = fname,
+        src = source_rel,
+        sha = source_sha,
+        fnn = fn_name,
+        ty = ty,
+        total = total,
+        const_name = const_name,
+        body = body
+    )
 }
 
 pub fn emit_ground_truth(root: &Path, units: &[ParseUnit]) {

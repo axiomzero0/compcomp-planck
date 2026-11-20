@@ -5,7 +5,8 @@
 // CEP:FAILURE: An emission bug surfaces as a DIF mismatch (kernel ground truth vs extracted Rust over the complete domain) or a cargo failure; both fail the build.
 // CEP:ASSUMES: the pinned term/type grammar of parse.rs; Rust 2021 tuples and fns.
 // CEP:COST: build-time only.
-// CEP:EVIDENCE: extract/planck_effect (generated); tools/fv/extract/artifacts (DIF records).
+// CEP:EVIDENCE: extract/planck_effect (generated); ground truth extract/planck_effect/ground_truth/*_table.rs (DR-8.7); tools/fv/extract/artifacts (DIF records).
+// CEP:SECURITY: repository-trusted inputs; emitted artifacts carry source sha256 provenance.
 // CEP:FV-CLASS: FV-2
 // CEP:FV-PROVER: N/A (tooling)
 // CEP:FV-SCRIPT: tools/extractor (cargo test; extractor check)
@@ -137,7 +138,8 @@ pub fn lib_rs_header(source_rel: &str, source_sha: &str, width: usize) -> String
 // CEP:FAILURE: Any disagreement with the kernel ground truth fails the DIF test; a hand edit is detected by planck-extractor check (regenerate + diff).
 // CEP:ASSUMES: the pinned Gallina subset; Rust 2021; the prelude mapping above (pinned in tools/extractor/src/emit.rs).
 // CEP:COST: runtime: O(1) per operation; build-time: cargo.
-// CEP:EVIDENCE: source sha256 {sha}; ground truth extract/planck_effect/ground_truth/*.txt (kernel vm_compute output, Coq 8.20.1); DIF artifacts under tools/fv/extract/artifacts/.
+// CEP:EVIDENCE: source sha256 {sha}; ground truth extract/planck_effect/ground_truth/*_table.rs (generated Rust source, kernel vm_compute output, Coq 8.20.1); DIF artifacts under tools/fv/extract/artifacts/.
+// CEP:SECURITY: repository-trusted inputs; generated mechanically — hand edits are non-conforming.
 // CEP:FV-CLASS: FV-0-equivalent-by-DIF (function-level equivalence over the complete finite domain; the extraction step itself is FV-2 tooling)
 // CEP:FV-PROVER: Coq 8.20.1 kernel (oracle for the DIF ground truth)
 // CEP:FV-SCRIPT: tools/extractor (extractor dif; cargo test in extract/planck_effect)
@@ -182,7 +184,13 @@ pub fn emit_all(root: &Path, units: &[ParseUnit]) {
         );
         std::fs::write(dir.join("Cargo.toml"), &cargo).expect("write Cargo.toml");
 
-        let test = dif_test_source(&u.file, &sha, &ty_name, width);
+        let test = dif_test_source(
+            &u.file,
+            &sha,
+            &ty_name,
+            width,
+            &crate::gt::tabulated_functions(u),
+        );
         std::fs::write(dir.join("tests").join("dif_effect.rs"), &test)
             .expect("write dif test");
     }
@@ -192,9 +200,19 @@ pub fn emit_all(root: &Path, units: &[ParseUnit]) {
 /// field k of the tuple, matching the kernel generator's weights), evaluate
 /// every (row,row) pair through the extracted functions, and require exact
 /// agreement with the kernel vm_compute ground truth over the complete domain.
-/// The row tuple construction and the index encoder are GENERATED from the
-/// parsed row width — nothing is hand-matched to the source.
-pub fn dif_test_source(source_rel: &str, sha: &str, _ty_name: &str, width: usize) -> String {
+/// The ground truth is compiled in: each table is a GENERATED Rust source
+/// under ground_truth/ (DR-8.7 — a Rust compilation unit, not a text dump),
+/// included verbatim via include!. The row tuple construction, the index
+/// encoder, and the per-function assertions are GENERATED from the parsed
+/// row width and parsed function list — nothing is hand-matched to the source.
+pub fn dif_test_source(
+    source_rel: &str,
+    sha: &str,
+    _ty_name: &str,
+    width: usize,
+    tabulated: &(Vec<String>, Vec<String>),
+) -> String {
+    let (row_fns, bool_fns) = tabulated;
     // Mechanically build, from width W:
     //  - make_row(i): nested tuple with field k = bit (W-1-k) of i
     //  - row_index(t): sum of field k * 2^(W-1-k)
@@ -239,23 +257,54 @@ pub fn dif_test_source(source_rel: &str, sha: &str, _ty_name: &str, width: usize
     }
     fields_fn.push_str("]\n}");
 
+    // The generated oracle module: every tabulated function's kernel ground
+    // truth is a generated Rust source (DR-8.7), included verbatim.
+    let mut includes = String::new();
+    for name in row_fns.iter().chain(bool_fns.iter()) {
+        includes.push_str(&format!(
+            "    include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/ground_truth/{}_table.rs\"));\n",
+            name
+        ));
+    }
+
+    // Per-function assertions, generated from the parsed tabulated list:
+    // row-returning functions compare through the pinned index encoder;
+    // bool-returning functions compare b2n-style.
+    let mut asserts = String::new();
+    for name in row_fns {
+        asserts.push_str(&format!(
+            "            assert_eq!(row_index(&{f}(a, b)), gt::{F}_TABLE[k] as usize, \"{f} mismatch at pair ({{}},{{}})\", i, j);\n",
+            f = name,
+            F = name.to_uppercase()
+        ));
+    }
+    for name in bool_fns {
+        asserts.push_str(&format!(
+            "            assert_eq!(if {f}(a, b) {{ 1 }} else {{ 0 }}, gt::{F}_TABLE[k] as usize, \"{f} mismatch at pair ({{}},{{}})\", i, j);\n",
+            f = name,
+            F = name.to_uppercase()
+        ));
+    }
+
     format!(
         r#"//! GENERATED FILE - DO NOT EDIT. Generated by planck-extractor from {src} (sha256 {sha}).
 //!
 //! DIF: differential equivalence of the extracted Rust against the Coq
 //! kernel (vm_compute) over the COMPLETE finite domain: all 2^{w} rows as
 //! inputs, all 2^{w} x 2^{w} pairs for the binary functions. The ground
-//! truth files under ground_truth/ are captured kernel output (Coq 8.20.1),
-//! regenerated by `planck-extractor dif` and never hand-edited.
+//! truth sources under ground_truth/ are generated Rust compilation units
+//! carrying captured kernel output (Coq 8.20.1, DR-8.7), regenerated by
+//! `planck-extractor dif` and never hand-edited.
 // CEP:FILE: extract/planck_effect/tests/dif_effect.rs
 // CEP:PROVENANCE: source {src} (sha256 {sha}); extractor planck-extractor; generated mechanically — hand edits are non-conforming (CEP-DR-01 §8 DR-8.2).
-// CEP:WHAT: DIF differential test: extracted row functions vs kernel ground truth over the complete 2^{w} x 2^{w} domain, per the pinned index encoding (bit W-1-k = tuple field k).
+// CEP:WHAT: DIF differential test: extracted row functions vs kernel ground truth over the complete 2^{w} x 2^{w} domain, per the pinned index encoding (bit W-1-k = tuple field k); the oracle is compiled in as generated Rust const data (DR-8.7).
 // CEP:WHY: CEP-DR-01 DR-1.5 adds method DIF for untrusted extraction output; this test is the discharge instrument and must pass in debug AND release (overflow-checks on).
 // CEP:STATUS: complete (generated)
-// CEP:FAILURE: any index, order, or value mismatch is a hard test failure; a missing ground-truth file fails the build (include_str!).
-// CEP:ASSUMES: ground truth files captured from kernel vm_compute (Coq 8.20.1) by planck-extractor dif; enumeration order identical on both sides (pinned by the same generator).
+// CEP:FAILURE: any index, order, or value mismatch is a hard test failure; a missing ground-truth source fails the build (include!).
+// CEP:ASSUMES: ground truth Rust sources generated from kernel vm_compute (Coq 8.20.1) by planck-extractor dif; enumeration order identical on both sides (pinned by the same generator).
 // CEP:COST: test-time only (65,536 evaluations per function, pure bool arithmetic).
-// CEP:EVIDENCE: this file; ground_truth/*.txt sha256 recorded under tools/fv/extract/artifacts/.
+// CEP:EVIDENCE: this file; ground_truth/*_table.rs sha256 recorded under tools/fv/extract/artifacts/.
+// CEP:SECURITY: repository-trusted inputs; generated mechanically — hand edits are non-conforming.
 // CEP:FV-CLASS: FV-2 harness discharging a DIF claim over a complete domain
 // CEP:FV-PROVER: Coq 8.20.1 kernel (oracle)
 // CEP:FV-SCRIPT: extract/planck_effect/tests/dif_effect.rs
@@ -266,6 +315,11 @@ use planck_effect::*;
 
 const WIDTH: usize = {w};
 const DOMAIN: usize = 1usize << WIDTH;
+
+// Kernel ground truth, compiled in (DR-8.7): each table is a GENERATED Rust
+// source under ground_truth/, included verbatim — no text parsing anywhere.
+mod gt {{
+{includes}}}
 
 // Index encoding pinned by the same generator that emits the kernel oracle:
 // index i, field k (0 = leftmost tuple field): bit (WIDTH-1-k) of i.
@@ -281,15 +335,6 @@ fn field_bit(i: usize, k: usize) -> bool {{
 
 {row_index_fn}
 
-fn parse_gt(text: &str, name: &str) -> Vec<usize> {{
-    let v: Vec<usize> = text
-        .split_whitespace()
-        .map(|s| s.parse().expect("ground truth integer"))
-        .collect();
-    assert_eq!(v.len(), DOMAIN * DOMAIN, "ground truth size mismatch in {{}}", name);
-    v
-}}
-
 #[test]
 fn domain_size_is_pinned() {{
     assert_eq!(DOMAIN, 1 << WIDTH);
@@ -297,31 +342,12 @@ fn domain_size_is_pinned() {{
 
 #[test]
 fn dif_row_functions_full_domain() {{
-    let gt_join = parse_gt(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/ground_truth/row_algebra_join.txt")),
-        "row_algebra_join.txt",
-    );
-    let gt_meet = parse_gt(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/ground_truth/row_algebra_meet.txt")),
-        "row_algebra_meet.txt",
-    );
-    let gt_leq = parse_gt(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/ground_truth/row_algebra_leq.txt")),
-        "row_algebra_leq.txt",
-    );
-
     for i in 0..DOMAIN {{
         for j in 0..DOMAIN {{
             let a = make_row(i);
             let b = make_row(j);
-            let jj = row_join(a, b);
-            let mm = row_meet(a, b);
-            let ll = row_leq(a, b);
             let k = i * DOMAIN + j;
-            assert_eq!(row_index(&jj), gt_join[k], "join mismatch at pair ({{}},{{}})", i, j);
-            assert_eq!(row_index(&mm), gt_meet[k], "meet mismatch at pair ({{}},{{}})", i, j);
-            assert_eq!(if ll {{ 1 }} else {{ 0 }}, gt_leq[k], "leq mismatch at pair ({{}},{{}})", i, j);
-        }}
+{asserts}        }}
     }}
 }}
 "#,
