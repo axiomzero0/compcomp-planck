@@ -1,20 +1,20 @@
 // CEP:FILE: tools/extractor/src/gt.rs
-// CEP:WHAT: Generation of rocq/Effect/DifGroundTruth.v — the kernel oracle: the full 2^W row enumeration as Gallina literals, the pinned index encoding (bit W-1-k = field k), and per-function index tables evaluated by kernel vm_compute over the complete 2^W x 2^W domain.
-// CEP:WHY: The DIF ground truth must come from the Coq kernel itself (vm_compute is kernel reduction), not from any hand-translated expectation; the enumeration and encoding are emitted by the same extractor that emits the Rust test, so both sides share one pinned convention.
+// CEP:WHAT: Generation of rocq/Effect/DifGroundTruth.v — the kernel oracle — for all three unit kinds: the effect row domain (full 2^W enumeration, pinned index encoding, per-function vm_compute tables), the charclass byte domain (256-entry tables per tabulated byte->bool function), and the operator domain (column tables over the closed 44-variant enumeration, sorted-table column tables, 1936-pair key_eq/key_lt and precedence_compare tables, and the pinned 16,563-key lookup sweep). Also emits the reference-axis tables (ref_charclass_tables.rs, ref_operator_tables.rs) parsed mechanically from the reference kernels, and the per-table generated Rust const sources (DR-8.7).
+// CEP:WHY: The DIF ground truth must come from the Coq kernel itself (vm_compute is kernel reduction), not from any hand-translated expectation; the enumeration, sweep, and encoding are emitted by the same extractor that emits the Rust test, so both sides share one pinned convention.
 // CEP:STATUS: complete
-// CEP:FAILURE: A wrong enumeration or weight would mismatch the Rust side and fail the DIF; both sides are generated from the same parsed width and field order.
-// CEP:ASSUMES: the parsed row type (width W, all-bool tuple, canonical field order); functions with signature (row,row) -> row and (row,row) -> bool in the unit; Coq 8.20.1 list printing via Eval vm_compute.
-// CEP:COST: kernel evaluation time (vm_compute over 65,536 pairs per function).
-// CEP:EVIDENCE: rocq/Effect/DifGroundTruth.v (generated); captured stdout emitted as generated Rust source extract/planck_effect/ground_truth/*_table.rs (DR-8.7: extraction deliverables are Rust compilation units, never plain-text dumps).
-// CEP:SECURITY: repository-trusted inputs; emitted tables carry source sha256 provenance.
+// CEP:FAILURE: A wrong enumeration, sweep, or weight would mismatch the Rust side and fail the DIF; both sides are generated from the same parsed data.
+// CEP:SECURITY: repository-trusted inputs; emitted tables carry source sha256 provenance; no secrets.
+// CEP:ASSUMES: the parsed units (row alias / byte binders / operator enums+table); functions with the pinned signatures; Coq 8.20.1 list printing via Eval vm_compute.
+// CEP:COST: kernel evaluation time (vm_compute over the complete domains).
+// CEP:EVIDENCE: rocq/Effect/DifGroundTruth.v (generated); captured stdout emitted as generated Rust sources */ground_truth/*_table.rs (DR-8.7); reference tables generated from math/crates sources.
 // CEP:FV-CLASS: FV-2
 // CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute)
 // CEP:FV-SCRIPT: tools/extractor (extractor ground-truth; extractor dif)
 // CEP:FV-SORRY-COUNT: N/A
-// CEP:FV-REFINEMENT: the oracle covers the complete finite input domain; no sampling.
+// CEP:FV-REFINEMENT: the oracle covers the complete finite input domain of each kind; no sampling.
 // CEP:FV-AXIOMS: none
 
-use crate::parse::{ParseUnit, Ty};
+use crate::parse::{ParseUnit, Ty, UnitKind};
 use std::path::Path;
 
 fn gallina_row(i: usize, width: usize) -> String {
@@ -28,7 +28,6 @@ fn gallina_row(i: usize, width: usize) -> String {
             String::from("false")
         });
     }
-    // right-nested: b0, (b1, ( ... (b_{w-2}, b_{w-1}) ... ))
     let mut expr = parts[width - 1].clone();
     for k in (0..width - 1).rev() {
         expr = format!("{}, ({})", parts[k], expr);
@@ -40,11 +39,7 @@ fn weights(width: usize) -> Vec<usize> {
     (0..width).map(|k| 1usize << (width - 1 - k)).collect()
 }
 
-/// Mechanically pick the functions to tabulate from their parsed signature:
-/// two row-typed binders; row-typed result -> index table; bool result -> b2n
-/// table. Returns (row_fns, bool_fns) in definition order. Shared by the .v
-/// oracle generator, the Rust test emitter, and the check guard so all three
-/// derive the table set from one parsed source of truth.
+/// Mechanically pick the (row,row)-arity functions to tabulate (v1 units).
 pub fn tabulated_functions(u: &ParseUnit) -> (Vec<String>, Vec<String>) {
     let (ty_name, _width) = u.row_type.clone().expect("row type alias");
     let mut row_fns: Vec<String> = Vec::new();
@@ -73,13 +68,112 @@ pub fn tabulated_functions(u: &ParseUnit) -> (Vec<String>, Vec<String>) {
     (row_fns, bool_fns)
 }
 
+/// Mechanically pick the byte->bool functions of a charclass unit: every
+/// single-binder (byte)->bool Definition except the check_ helpers.
+pub fn tabulated_byte_functions(u: &ParseUnit) -> Vec<String> {
+    let mut fns = Vec::new();
+    for d in &u.definitions {
+        if d.ty_alias.is_some() || d.binders.len() != 1 {
+            continue;
+        }
+        if !d.binders.iter().all(|(_, t)| matches!(t, Ty::Named(n) if n == "byte")) {
+            continue;
+        }
+        if !matches!(&d.ret, Ty::Bool) {
+            continue;
+        }
+        if d.name.starts_with("check_") {
+            continue;
+        }
+        fns.push(d.name.clone());
+    }
+    if fns.is_empty() {
+        eprintln!("ERROR: no (byte)->bool functions found to tabulate");
+        std::process::exit(1);
+    }
+    fns
+}
+
 pub fn ground_truth_v(units: &[ParseUnit]) -> String {
-    let u = &units[0];
+    let mut out = String::new();
+    out.push_str("(* GENERATED FILE - DO NOT EDIT. Generated by planck-extractor.\n");
+    out.push_str("   Kernel oracle for DIF: per-domain complete enumerations, the pinned\n");
+    out.push_str("   index encodings, and per-function index tables evaluated by kernel\n");
+    out.push_str("   vm_compute. Hand edits are non-conforming.\n");
+    out.push_str("   CEP:FILE: rocq/Effect/DifGroundTruth.v\n");
+    out.push_str("   CEP:PROVENANCE: extractor planck-extractor; generated mechanically from the parsed units — hand edits are non-conforming (CEP-DR-01 §8 DR-8.2).\n");
+    out.push_str("   CEP:WHAT: Kernel ground-truth tables for the DIF differential equivalence method: the effect row enumeration + pinned index encoding, the charclass 256-byte enumeration, the operator closed domains (44 rows, 1936 pairs, 16,563-key sweep) — all evaluated by vm_compute over the complete domains.\n");
+    out.push_str("   CEP:WHY: The DIF oracle must be the Coq kernel itself; this file is generated by the same extractor that emits the Rust test, so both sides share one pinned enumeration and encoding.\n");
+    out.push_str("   CEP:STATUS: complete (generated)\n");
+    out.push_str("   CEP:FAILURE: Any mismatch between this file's encodings and the Rust test's encodings fails the DIF loudly; regeneration is the only edit path.\n");
+    out.push_str("   CEP:ASSUMES: Coq 8.20.1; the pinned extraction units and their signatures.\n");
+    out.push_str("   CEP:COST: kernel vm_compute over the complete domains per table.\n");
+    out.push_str("   CEP:EVIDENCE: the Eval vm_compute outputs captured by planck-extractor dif into */ground_truth/.\n");
+    out.push_str("   CEP:SECURITY: no secrets; repository-trusted inputs; generated mechanically, hand edits are non-conforming.\n");
+    out.push_str("   CEP:FV-CLASS: FV-2\n");
+    out.push_str("   CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute)\n");
+    out.push_str("   CEP:FV-SCRIPT: tools/extractor (extractor dif)\n");
+    out.push_str("   CEP:FV-SORRY-COUNT: N/A\n");
+    out.push_str("   CEP:FV-REFINEMENT: complete-domain oracle; no sampling.\n");
+    out.push_str("   CEP:FV-AXIOMS: none *)\n\n");
+
+    out.push_str("Require Import List.\nImport ListNotations.\n");
+    for u in units {
+        match u.kind {
+            UnitKind::Row => out.push_str("Require Import Effect.RowAlgebra.\n"),
+            UnitKind::Byte => out.push_str("Require Import Effect.CharClass.\n"),
+            UnitKind::Operator => {
+                out.push_str("Require Import Effect.OperatorEnums.\n");
+                out.push_str("Require Import Effect.OperatorTableData.\n");
+                out.push_str("Require Import Effect.OperatorTable.\n");
+            }
+        }
+    }
+    out.push_str("Import ListNotations.\nImport PinnedEnums.\n\n");
+    out.push_str("Definition b2n (b : bool) : nat := if b then 1 else 0.\n\n");
+
+    let mut operator_done = false;
+    let mut byte_done = false;
+    let mut ref_keys: Option<Vec<String>> = None;
+    for u in units {
+        match u.kind {
+            UnitKind::Row => out.push_str(&effect_section(u)),
+            UnitKind::Byte => {
+                if !byte_done {
+                    out.push_str(&charclass_section(u));
+                    byte_done = true;
+                }
+            }
+            UnitKind::Operator => {
+                if !operator_done {
+                    out.push_str(&operator_section());
+                    operator_done = true;
+                    // the pinned sweep needs the reference keys; parse the
+                    // reference source mechanically (the same transcription
+                    // the data unit was generated from)
+                    let op_src = std::fs::read_to_string(
+                        Path::new(crate::transcribe::REF_OPERATOR),
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("ERROR: cannot read the reference source: {}", e);
+                        std::process::exit(1);
+                    });
+                    let (rows, _, _) = crate::transcribe::parse_ref_operator(&op_src);
+                    let keys: Vec<String> = rows.iter().map(|r| r.token.clone()).collect();
+                    out.push_str(&sweep_oracle_section(&keys));
+                    ref_keys = Some(keys);
+                }
+            }
+        }
+    }
+    let _ = ref_keys;
+    out
+}
+
+fn effect_section(u: &ParseUnit) -> String {
     let (ty_name, width) = u.row_type.clone().expect("row type alias");
     let (row_fns, bool_fns) = tabulated_functions(u);
-
     let ws = weights(width);
-    // Build the row_index definition text from fst/snd chains (mechanical):
     let mut field_exprs: Vec<String> = Vec::new();
     for k in 0..width {
         let mut expr = String::from("r");
@@ -119,37 +213,11 @@ pub fn ground_truth_v(units: &[ParseUnit]) -> String {
     all_rows.push_str(" ].");
 
     let mut out = String::new();
-    out.push_str("(* GENERATED FILE - DO NOT EDIT. Generated by planck-extractor.\n");
-    out.push_str(&format!("   Kernel oracle for DIF: the complete 2^{} row domain, the pinned\n", width));
-    out.push_str("   index encoding (bit W-1-k = field k), and per-function index tables\n");
-    out.push_str("   evaluated by kernel vm_compute. Hand edits are non-conforming.\n");
-    out.push_str("   CEP:FILE: rocq/Effect/DifGroundTruth.v\n");
-    out.push_str("   CEP:PROVENANCE: extractor planck-extractor; generated mechanically from the parsed row domain — hand edits are non-conforming (CEP-DR-01 §8 DR-8.2).\n");
-    out.push_str("   CEP:WHAT: Kernel ground-truth tables for the DIF differential equivalence method: full row enumeration + pinned index encoding + vm_compute tables over the complete domain.\n");
-    out.push_str("   CEP:WHY: The DIF oracle must be the Coq kernel itself; this file is generated by the same extractor that emits the Rust test, so both sides share one pinned enumeration and encoding.\n");
-    out.push_str("   CEP:STATUS: complete (generated)\n");
-    out.push_str("   CEP:FAILURE: Any mismatch between this file's encoding and the Rust test's encoding fails the DIF loudly; regeneration is the only edit path.\n");
-    out.push_str("   CEP:ASSUMES: Coq 8.20.1; the source unit's row type and (row,row)-arity functions.\n");
-    out.push_str("   CEP:COST: kernel vm_compute over 65,536 pairs per function.\n");
-    out.push_str("   CEP:EVIDENCE: the Eval vm_compute outputs captured by planck-extractor dif into extract/planck_effect/ground_truth/.\n");
-    out.push_str("   CEP:SECURITY: no secrets; repository-trusted inputs; generated mechanically, hand edits are non-conforming.\n");
-    out.push_str("   CEP:FV-CLASS: FV-2\n");
-    out.push_str("   CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute)\n");
-    out.push_str("   CEP:FV-SCRIPT: tools/extractor (extractor dif)\n");
-    out.push_str("   CEP:FV-SORRY-COUNT: N/A\n");
-    out.push_str("   CEP:FV-REFINEMENT: complete-domain oracle; no sampling.\n");
-    out.push_str("   CEP:FV-AXIOMS: none *)\n\n");
-    out.push_str("Require Import Effect.RowAlgebra.\nRequire Import List.\nImport ListNotations.\n\n");
-    out.push_str("Definition b2n (b : bool) : nat := if b then 1 else 0.\n\n");
+    out.push_str("(* ---- effect row domain ---- *)\n\n");
     out.push_str(&row_index_def);
     out.push_str("\n\n");
     out.push_str(&all_rows);
     out.push_str("\n\n");
-
-    // The full table for each function is DEFINED for documentation (kernel
-    // type-checked), but EVALUATED in chunks: one vm_compute per fixed r1
-    // over all r2. Chunking keeps kernel memory bounded (unary nats at full
-    // table size were OOM-killed in the first pinned run).
     for f in &row_fns {
         out.push_str(&format!(
             "Definition {}_index_table : list nat :=\n  flat_map (fun r1 => map (fun r2 => row_index ({} r1 r2)) all_rows) all_rows.\n\n",
@@ -162,12 +230,7 @@ pub fn ground_truth_v(units: &[ParseUnit]) -> String {
             f, f
         ));
     }
-
-    // Sanity: enumeration size.
-    out.push_str("Eval vm_compute in (length all_rows).\n");
-
-    // Chunked value dumps. Order pinned: row functions first, then bool
-    // functions; within a function, r1 in all_rows order (index 0..2^W-1).
+    out.push_str("Eval vm_compute in (length all_rows).\n\n");
     let n = 1usize << width;
     for i in 0..n {
         let r1 = gallina_row(i, width);
@@ -184,23 +247,137 @@ pub fn ground_truth_v(units: &[ParseUnit]) -> String {
             ));
         }
     }
+    out.push('\n');
     out
 }
 
-/// Generated Rust source for one kernel ground-truth table (DR-8.7): the
-/// extraction deliverable form is a Rust compilation unit — a `pub const`
-/// array included verbatim by the generated DIF test — never a plain-text
-/// dump. The entry type is chosen mechanically from the table maximum.
+fn charclass_section(u: &ParseUnit) -> String {
+    let fns = tabulated_byte_functions(u);
+    let mut out = String::new();
+    out.push_str("(* ---- charclass byte domain ---- *)\n\n");
+    for f in &fns {
+        out.push_str(&format!(
+            "Definition {}_byte_table : list nat := map (fun b => b2n ({} b)) (seq 0 256).\n\n",
+            f, f
+        ));
+    }
+    for f in &fns {
+        out.push_str(&format!("Eval vm_compute in ({}_byte_table).\n", f));
+    }
+    out.push('\n');
+    out
+}
+
+/// The pinned 16,563-key lookup sweep, shared by the kernel oracle and the
+/// Rust test: 44 sorted keys, then the empty string, then all 128 one-byte
+/// ASCII strings, then all 16,384 two-byte ASCII strings, then the 6 delimiters.
+pub fn sweep_keys(ref_keys: &[String]) -> Vec<Vec<u32>> {
+    let mut keys: Vec<Vec<u32>> = Vec::new();
+    for k in ref_keys {
+        keys.push(k.chars().map(|c| c as u32).collect());
+    }
+    keys.push(Vec::new()); // the empty string
+    for a in 0u32..128 {
+        keys.push(vec![a]);
+    }
+    for a in 0u32..128 {
+        for b in 0u32..128 {
+            keys.push(vec![a, b]);
+        }
+    }
+    for d in ["(", ")", "[", "]", "{", "}"] {
+        keys.push(d.chars().map(|c| c as u32).collect());
+    }
+    assert_eq!(keys.len(), 16_563, "pinned sweep size");
+    keys
+}
+
+fn gallina_key(codes: &[u32]) -> String {
+    if codes.is_empty() {
+        String::from("nil")
+    } else {
+        format!(
+            "[{}]",
+            codes
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+}
+
+fn operator_section() -> String {
+    let mut out = String::new();
+    out.push_str("(* ---- operator table domain ---- *)\n\n");
+    // column tables over the closed enumeration
+    out.push_str("Definition opid_index_table : list nat := map opid_index all_opids.\n\n");
+    out.push_str("Definition precedence_table : list nat := map precedence all_opids.\n\n");
+    out.push_str("Definition assoc_table : list nat := map (fun o => assoc_ord (associativity o)) all_opids.\n\n");
+    out.push_str("Definition arity_table : list nat := map (fun o => arity_ord (arity_of o)) all_opids.\n\n");
+    out.push_str("Definition arity_count_table : list nat := map (fun o => arity_count (arity_of o)) all_opids.\n\n");
+    out.push_str("Definition overloadable_table : list nat := map (fun o => b2n (overloadable o)) all_opids.\n\n");
+    out.push_str("Definition overflow_table : list nat := map (fun o => overflow_ord (overflow_of o)) all_opids.\n\n");
+    // sorted-table column tables
+    out.push_str("Definition tbl_precedence_table : list nat := map row_precedence operator_table_sorted.\n\n");
+    out.push_str("Definition tbl_assoc_table : list nat := map (fun r => assoc_ord (row_assoc r)) operator_table_sorted.\n\n");
+    out.push_str("Definition tbl_arity_table : list nat := map (fun r => arity_ord (row_arity r)) operator_table_sorted.\n\n");
+    out.push_str("Definition tbl_overloadable_table : list nat := map (fun r => b2n (row_overloadable r)) operator_table_sorted.\n\n");
+    out.push_str("Definition tbl_overflow_table : list nat := map (fun r => overflow_ord (row_overflow r)) operator_table_sorted.\n\n");
+    // 1936-pair tables
+    out.push_str("Definition key_eq_table : list nat :=\n  flat_map (fun r1 => map (fun r2 => b2n (key_eq (row_key r1) (row_key r2))) operator_table_sorted) operator_table_sorted.\n\n");
+    out.push_str("Definition key_lt_table : list nat :=\n  flat_map (fun r1 => map (fun r2 => b2n (key_lt (row_key r1) (row_key r2))) operator_table_sorted) operator_table_sorted.\n\n");
+    out.push_str("Definition precedence_compare_table : list nat :=\n  flat_map (fun a => map (fun b => ordering_ord (precedence_compare a b)) all_opids) all_opids.\n\n");
+    // the pinned sweep
+    out.push_str("Definition lookup_ix (k : key) : nat :=\n  match lookup k with Ok r => opid_index (row_opid r) | Err _ => 0 end.\n\n");
+    out.push_str("Eval vm_compute in (map opid_index all_opids).\n");
+    out.push_str("Eval vm_compute in (map precedence all_opids).\n");
+    out.push_str("Eval vm_compute in (map (fun o => assoc_ord (associativity o)) all_opids).\n");
+    out.push_str("Eval vm_compute in (map (fun o => arity_ord (arity_of o)) all_opids).\n");
+    out.push_str("Eval vm_compute in (map (fun o => arity_count (arity_of o)) all_opids).\n");
+    out.push_str("Eval vm_compute in (map (fun o => b2n (overloadable o)) all_opids).\n");
+    out.push_str("Eval vm_compute in (map (fun o => overflow_ord (overflow_of o)) all_opids).\n");
+    out.push_str("Eval vm_compute in (map row_precedence operator_table_sorted).\n");
+    out.push_str("Eval vm_compute in (map (fun r => assoc_ord (row_assoc r)) operator_table_sorted).\n");
+    out.push_str("Eval vm_compute in (map (fun r => arity_ord (row_arity r)) operator_table_sorted).\n");
+    out.push_str("Eval vm_compute in (map (fun r => b2n (row_overloadable r)) operator_table_sorted).\n");
+    out.push_str("Eval vm_compute in (map (fun r => overflow_ord (row_overflow r)) operator_table_sorted).\n");
+    out.push_str("Eval vm_compute in (key_eq_table).\n");
+    out.push_str("Eval vm_compute in (key_lt_table).\n");
+    out.push_str("Eval vm_compute in (precedence_compare_table).\n");
+    out.push('\n');
+    out
+}
+
+/// The sweep section is appended separately (it needs the reference keys).
+pub fn sweep_oracle_section(ref_keys: &[String]) -> String {
+    let keys = sweep_keys(ref_keys);
+    let mut out = String::new();
+    out.push_str("(* ---- the pinned 16,563-key lookup sweep ---- *)\n\n");
+    out.push_str("Definition sweep_keys : list key :=\n  [ ");
+    for (i, k) in keys.iter().enumerate() {
+        if i > 0 {
+            out.push_str("; ");
+            if i % 8 == 0 {
+                out.push_str("\n    ");
+            }
+        }
+        out.push_str(&gallina_key(k));
+    }
+    out.push_str(" ].\n\n");
+    out.push_str("Definition lookup_sweep_table : list nat := map lookup_ix sweep_keys.\n\n");
+    out.push_str("Eval vm_compute in (lookup_sweep_table).\n\n");
+    out
+}
+
+/// Generated Rust source for one kernel ground-truth table (DR-8.7).
 pub fn ground_truth_rs(
     fn_name: &str,
     vals: &[usize],
     source_rel: &str,
     source_sha: &str,
-    width: usize,
 ) -> String {
-    let n = 1usize << width;
-    let total = n * n;
-    assert_eq!(vals.len(), total, "ground truth table size");
+    let total = vals.len();
     let max = vals.iter().copied().max().unwrap_or(0);
     let ty = if max <= 255 {
         "u8"
@@ -229,22 +406,22 @@ pub fn ground_truth_rs(
         r"// GENERATED FILE - DO NOT EDIT.
 //
 // Generated mechanically by planck-extractor (dif) from the Coq kernel's
-// vm_compute output over the complete 2^{w} x 2^{w} domain. This is the
-// extraction deliverable form pinned by CEP-DR-01 §8 DR-8.7: kernel oracle
-// data is a compiled Rust source included by the DIF test harness — a
-// plain-text dump (.txt) is non-conforming as extraction output.
-// Hand edits are non-conforming: any value change fails the DIF loudly;
-// any format tamper fails cargo (include!) or `planck-extractor check`.
-// CEP:FILE: extract/planck_effect/ground_truth/{fname}
+// vm_compute output over the complete domain. This is the extraction
+// deliverable form pinned by CEP-DR-01 §8 DR-8.7: kernel oracle data is a
+// compiled Rust source included by the DIF test harness — a plain-text dump
+// (.txt) is non-conforming as extraction output.
+// Hand edits are non-conforming: any value change fails the DIF loudly; any
+// format tamper fails cargo (include!) or `planck-extractor check`.
+// CEP:FILE: (generated ground truth) {fname}
 // CEP:PROVENANCE: source {src} (sha256 {sha}); kernel oracle rocq/Effect/DifGroundTruth.v (vm_compute, Coq 8.20.1); extractor planck-extractor (dif); generated mechanically — hand edits are non-conforming (CEP-DR-01 §8 DR-8.2/DR-8.7).
-// CEP:WHAT: Kernel ground-truth table for {fnn} over the complete 2^{w} x 2^{w} domain (65,536 pairs), as compiled Rust const data consumed by the generated DIF test via include!.
-// CEP:WHY: CEP-DR-01 DR-1.5 method DIF requires the oracle to be the kernel itself; DR-8.7 requires every generated artifact under extract/ to be a Rust compilation unit — the oracle data therefore compiles into the test harness instead of being parsed from text at test time.
+// CEP:WHAT: Kernel ground-truth table for {fnn} over the complete pinned domain ({total} entries), as compiled Rust const data consumed by the generated DIF test via include!.
+// CEP:WHY: CEP-DR-01 DR-1.5 method DIF requires the oracle to be the kernel itself; DR-8.7 requires every generated artifact under extract/ to be a Rust compilation unit.
 // CEP:STATUS: complete (generated)
 // CEP:FAILURE: A value edit breaks equivalence and fails the DIF loudly; a format edit fails the cargo build or the planck-extractor check guard.
-// CEP:ASSUMES: kernel vm_compute output (Coq 8.20.1, pinned); index encoding bit W-1-k = field k; entries fit {ty} (mechanically chosen from the table maximum).
+// CEP:SECURITY: repository-trusted inputs.
+// CEP:ASSUMES: kernel vm_compute output (Coq 8.20.1, pinned); entries fit {ty} (mechanically chosen from the table maximum).
 // CEP:COST: compile-time only (const data in the test binary).
 // CEP:EVIDENCE: rocq/Effect/DifGroundTruth.v; DIF artifacts under tools/fv/extract/artifacts/ (sha256 of this file recorded per run).
-// CEP:SECURITY: repository-trusted inputs.
 // CEP:FV-CLASS: FV-2 (generated oracle data; qualified by the DIF it feeds)
 // CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute)
 // CEP:FV-SCRIPT: tools/extractor (extractor dif; extractor check)
@@ -257,7 +434,6 @@ pub const {const_name}: [{ty}; {total}] = [
     {body}
 ];
 ",
-        w = width,
         fname = fname,
         src = source_rel,
         sha = source_sha,
@@ -266,6 +442,405 @@ pub const {const_name}: [{ty}; {total}] = [
         total = total,
         const_name = const_name,
         body = body
+    )
+}
+
+/// The reference-axis tables for the charclass crate, parsed mechanically
+/// from the reference kernel's test truth tables.
+pub fn ref_charclass_tables_rs(ref_src: &str, ref_sha: &str) -> String {
+    let tables = parse_ref_truth_tables(ref_src);
+    let mut body = String::new();
+    let mut entries = Vec::new();
+    for (name, bits) in &tables {
+        let mut arr = String::new();
+        for (i, b) in bits.iter().enumerate() {
+            if i > 0 {
+                arr.push_str(", ");
+                if i % 16 == 0 {
+                    arr.push_str("\n    ");
+                }
+            }
+            arr.push_str(&if *b { "1" } else { "0" }.to_string());
+        }
+        entries.push(format!(
+            "pub const {}: [u8; 256] = [\n    {}\n];",
+            name.to_uppercase(),
+            arr
+        ));
+    }
+    body.push_str(&entries.join("\n\n"));
+    format!(
+        r#"// GENERATED FILE - DO NOT EDIT.
+//
+// Generated mechanically by planck-extractor (transcribe) from the reference
+// kernel's pinned test truth tables (math/crates/planck-charclass/src/lib.rs,
+// sha256 {sha}). Reference axis of the DIF: the extracted predicates must
+// agree with these EXH-certified tables over the complete 256-byte domain.
+// Hand edits are non-conforming (DR-8.2); regenerate with planck-extractor.
+// CEP:FILE: extract/planck_charclass/ground_truth/ref_charclass_tables.rs
+// CEP:PROVENANCE: source math/crates/planck-charclass/src/lib.rs (sha256 {sha}); extractor planck-extractor (transcribe); generated mechanically.
+// CEP:WHAT: The reference truth tables (whitespace, decimal, hex, ident start/continue, comment lead byte) as 256-entry 0/1 arrays.
+// CEP:WHY: The three-way DIF (extracted vs kernel vs reference) closes the transcription loop mechanically.
+// CEP:STATUS: complete (generated)
+// CEP:FAILURE: A mismatch fails the DIF reference-axis test loudly.
+// CEP:SECURITY: repository-trusted inputs.
+// CEP:ASSUMES: the reference tables are EXH-certified to Volume 02 §2.2.0 by the reference crate's own tests.
+// CEP:COST: compile-time only.
+// CEP:EVIDENCE: the DIF artifact records this file's sha256 per run.
+// CEP:FV-CLASS: FV-2 (generated reference data)
+// CEP:FV-PROVER: N/A (mechanical transcription of EXH-certified const data)
+// CEP:FV-SCRIPT: tools/extractor (extractor transcribe)
+// CEP:FV-SORRY-COUNT: N/A
+// CEP:FV-REFINEMENT: complete 256-byte domain; no sampling.
+// CEP:FV-AXIOMS: none
+
+{body}
+"#,
+        sha = ref_sha,
+        body = body
+    )
+}
+
+/// Parse the reference charclass test truth tables ([u8; 32] bit blocks).
+fn parse_ref_truth_tables(src: &str) -> Vec<(String, Vec<bool>)> {
+    let mut out = Vec::new();
+    for block in [
+        ("REF_WS", "WHITESPACE_TRUTH"),
+        ("REF_DEC", "DECIMAL_DIGIT_TRUTH"),
+        ("REF_HEX", "HEX_DIGIT_TRUTH"),
+        ("REF_IDS", "IDENT_START_TRUTH"),
+        ("REF_IDC", "IDENT_CONTINUE_TRUTH"),
+        ("REF_COMMENT", "COMMENT_START_TRUTH"),
+    ] {
+        let (ours, theirs) = block;
+        let start = match src.find(&format!("const {}: [u8; 32]", theirs)) {
+            Some(p) => p,
+            None => {
+                eprintln!("ERROR: reference truth table {} not found", theirs);
+                std::process::exit(1);
+            }
+        };
+        let end = src[start..].find("};").map(|p| start + p).unwrap();
+        let body = &src[start..end];
+        let mut bits = vec![false; 256];
+        // base: copy of another table or zeros
+        if let Some(base) = extract_base_table(body, src) {
+            for (i, b) in base.iter().enumerate() {
+                bits[i] = *b;
+            }
+        }
+        // assignments t[N] = 0xHH;
+        for cap in body.match_iter_regex_assign() {
+            let (idx, val) = cap;
+            for bit in 0..8 {
+                bits[idx * 8 + bit] = (val >> bit) & 1 == 1;
+            }
+        }
+        out.push((ours.to_string(), bits));
+    }
+    out
+}
+
+trait MatchIterRegex {
+    fn match_iter_regex_assign(&self) -> Vec<(usize, u8)>;
+}
+
+impl MatchIterRegex for str {
+    fn match_iter_regex_assign(&self) -> Vec<(usize, u8)> {
+        // hand-rolled parse of `t[N] = 0xHH;` assignments (no regex crate)
+        let mut out = Vec::new();
+        let bytes = self.as_bytes();
+        let mut i = 0usize;
+        while i + 6 < bytes.len() {
+            if bytes[i] == b't'
+                && bytes.get(i + 1) == Some(&b'[')
+            {
+                let close = self[i..].find(']').map(|p| i + p);
+                if let Some(close) = close {
+                    let idx: Result<usize, _> = self[i + 2..close].parse();
+                    if let Ok(idx) = idx {
+                        let rest = &self[close..];
+                        if rest.starts_with("] = 0x") {
+                            // parse the longest hex-digit run after 0x
+                            let hex_part = &rest[6..];
+                            let hex_len = hex_part
+                                .chars()
+                                .take_while(|c| c.is_ascii_hexdigit())
+                                .count();
+                            if hex_len > 0 {
+                                if let Ok(v) = u8::from_str_radix(&hex_part[..hex_len], 16) {
+                                    out.push((idx, v));
+                                    i = close + 6 + hex_len;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+}
+
+fn extract_base_table(body: &str, src: &str) -> Option<Vec<bool>> {
+    // `let mut t = NAME;` — copy the previously parsed table
+    let marker = "let mut t = ";
+    let pos = body.find(marker)?;
+    let rest = &body[pos + marker.len()..];
+    let name_end = rest.find(';')?;
+    let name = &rest[..name_end];
+    if name == "[0u8; 32]" {
+        return None;
+    }
+    // find that table's block in src and parse it (recursively, one level)
+    let start = src.find(&format!("const {}: [u8; 32]", name))?;
+    let end = src[start..].find("};").map(|p| start + p)?;
+    let base_body = &src[start..end];
+    let mut bits = vec![false; 256];
+    for (idx, val) in base_body.match_iter_regex_assign() {
+        for bit in 0..8 {
+            bits[idx * 8 + bit] = (val >> bit) & 1 == 1;
+        }
+    }
+    Some(bits)
+}
+
+/// The reference-axis tables for the operator crate, generated from the
+/// reference rows parsed by transcribe.
+pub fn ref_operator_tables_rs(
+    ref_rows: &[crate::transcribe::RefRow],
+    decl_order: &[String],
+    ref_keys_sorted: &[String],
+    sweep: &[usize],
+    ref_sha: &str,
+) -> String {
+    // the sorted-position -> OP-number map (the transcription identity)
+    let mut op_of_sorted: Vec<usize> = Vec::new();
+    {
+        let by_token: std::collections::HashMap<&str, &crate::transcribe::RefRow> =
+            ref_rows.iter().map(|r| (r.token.as_str(), r)).collect();
+        for tk in ref_keys_sorted {
+            let r = by_token.get(tk.as_str()).unwrap_or_else(|| {
+                eprintln!("ERROR: no reference row for key {}", tk);
+                std::process::exit(1)
+            });
+            let pos = decl_order.iter().position(|o| o == &r.id).unwrap_or_else(|| {
+                eprintln!("ERROR: no OP number for {}", r.id);
+                std::process::exit(1)
+            });
+            op_of_sorted.push(pos + 1);
+        }
+    }
+    let op_map_arr = {
+        let mut s2 = String::new();
+        for (i, v) in op_of_sorted.iter().enumerate() {
+            if i > 0 {
+                s2.push_str(", ");
+                if i % 16 == 0 {
+                    s2.push_str("\n    ");
+                }
+            }
+            s2.push_str(&v.to_string());
+        }
+        format!("pub const REF_OP_OF_SORTED_KEY_TABLE: [u8; {}] = [\n    {}\n];", op_of_sorted.len(), s2)
+    };
+    let assoc_ord = |a: &str| match a {
+        "Left" => 0usize,
+        "Right" => 1usize,
+        "None" => 2usize,
+        _ => {
+            eprintln!("ERROR: unknown assoc {}", a);
+            std::process::exit(1)
+        }
+    };
+    let arity_ord = |a: &str| match a {
+        "Zero" => 0usize,
+        "One" => 1usize,
+        "Two" => 2usize,
+        _ => {
+            eprintln!("ERROR: unknown arity {}", a);
+            std::process::exit(1)
+        }
+    };
+    let ovf_ord = |a: &str| match a {
+        "Panic" => 0usize,
+        "Wrap" => 1usize,
+        "Unchecked" => 2usize,
+        "NotApplicable" => 3usize,
+        _ => {
+            eprintln!("ERROR: unknown overflow {}", a);
+            std::process::exit(1)
+        }
+    };
+    // per-opid columns in declaration order
+    let mut by_id: std::collections::HashMap<&str, &crate::transcribe::RefRow> =
+        std::collections::HashMap::new();
+    for r in ref_rows {
+        by_id.insert(r.id.as_str(), r);
+    }
+    let mut prec: Vec<usize> = Vec::new();
+    let mut assoc: Vec<usize> = Vec::new();
+    let mut arit: Vec<usize> = Vec::new();
+    let mut count: Vec<usize> = Vec::new();
+    let mut over: Vec<usize> = Vec::new();
+    let mut ovf: Vec<usize> = Vec::new();
+    for o in decl_order {
+        let r = by_id.get(o.as_str()).unwrap_or_else(|| {
+            eprintln!("ERROR: reference row for {} not found", o);
+            std::process::exit(1)
+        });
+        prec.push(r.precedence);
+        assoc.push(assoc_ord(&r.assoc));
+        arit.push(arity_ord(&r.arity));
+        count.push(match r.arity.as_str() {
+            "Zero" => 0,
+            "One" => 1,
+            "Two" => 2,
+            _ => 0,
+        });
+        over.push(if r.overloadable { 1 } else { 0 });
+        ovf.push(ovf_ord(&r.overflow));
+    }
+    let fmt_arr = |name: &str, vals: &[usize]| -> String {
+        let mut s = String::new();
+        for (i, v) in vals.iter().enumerate() {
+            if i > 0 {
+                s.push_str(", ");
+                if i % 16 == 0 {
+                    s.push_str("\n    ");
+                }
+            }
+            s.push_str(&v.to_string());
+        }
+        format!("pub const {}: [u8; {}] = [\n    {}\n];", name, vals.len(), s)
+    };
+    let keys_arr = {
+        let mut s = String::new();
+        for (i, k) in ref_keys_sorted.iter().enumerate() {
+            if i > 0 {
+                s.push_str(", ");
+                if i % 4 == 0 {
+                    s.push_str("\n    ");
+                }
+            }
+            s.push_str(&format!("{:?}", k));
+        }
+        format!("pub const REF_KEYS_TABLE: [&str; {}] = [\n    {}\n];", ref_keys_sorted.len(), s)
+    };
+    let sweep_arr = {
+        let mut s = String::new();
+        for (i, v) in sweep.iter().enumerate() {
+            if i > 0 {
+                s.push_str(", ");
+                if i % 20 == 0 {
+                    s.push_str("\n    ");
+                }
+            }
+            s.push_str(&v.to_string());
+        }
+        format!("pub const REF_LOOKUP_SWEEP_TABLE: [u8; {}] = [\n    {}\n];", sweep.len(), s)
+    };
+    format!(
+        r#"// GENERATED FILE - DO NOT EDIT.
+//
+// Generated mechanically by planck-extractor (transcribe) from the reference
+// kernel's pinned table (math/crates/planck-operator-math/src/lib.rs, sha256
+// {sha}). Reference axis of the operator DIF.
+// Hand edits are non-conforming (DR-8.2); regenerate with planck-extractor.
+// CEP:FILE: extract/planck_operator/ground_truth/ref_operator_tables.rs
+// CEP:PROVENANCE: source math/crates/planck-operator-math/src/lib.rs (sha256 {sha}); extractor planck-extractor (transcribe); generated mechanically.
+// CEP:WHAT: The reference operator columns per OpId (declaration order), the sorted reference keys, and the reference lookup sweep (independent linear scan over the reference keys).
+// CEP:WHY: The three-way DIF closes the transcription loop mechanically: extracted == kernel == reference over the closed domains.
+// CEP:STATUS: complete (generated)
+// CEP:FAILURE: A mismatch fails the DIF reference-axis test loudly.
+// CEP:SECURITY: repository-trusted inputs.
+// CEP:ASSUMES: the reference table is EXH-certified to Volume 02 §2.4.1 by the reference crate's own tests; the sweep encoding matches the kernel oracle's.
+// CEP:COST: compile-time only.
+// CEP:EVIDENCE: the DIF artifact records this file's sha256 per run.
+// CEP:FV-CLASS: FV-2 (generated reference data)
+// CEP:FV-PROVER: N/A (mechanical transcription of EXH-certified const data)
+// CEP:FV-SCRIPT: tools/extractor (extractor transcribe)
+// CEP:FV-SORRY-COUNT: N/A
+// CEP:FV-REFINEMENT: complete closed domains; no sampling.
+// CEP:FV-AXIOMS: none
+
+{keys_arr}
+
+{op_map_arr}
+
+{prec}
+
+{assoc}
+
+{arit}
+
+{count}
+
+{over}
+
+{ovf}
+
+{sweep}
+"#,
+        sha = ref_sha,
+        keys_arr = keys_arr,
+        op_map_arr = op_map_arr,
+        prec = fmt_arr("REF_PRECEDENCE_TABLE", &prec),
+        assoc = fmt_arr("REF_ASSOC_TABLE", &assoc),
+        arit = fmt_arr("REF_ARITY_TABLE", &arit),
+        count = fmt_arr("REF_COUNT_TABLE", &count),
+        over = fmt_arr("REF_OVERLOADABLE_TABLE", &over),
+        ovf = fmt_arr("REF_OVERFLOW_TABLE", &ovf),
+        sweep = sweep_arr,
+    )
+}
+
+/// The generated sweep-keys Rust module (shared by kernel GT and the test).
+pub fn sweep_keys_rs(keys: &[Vec<u32>], ref_sha: &str) -> String {
+    let mut s = String::new();
+    for (i, k) in keys.iter().enumerate() {
+        if i > 0 {
+            s.push_str(", ");
+            if i % 6 == 0 {
+                s.push_str("\n    ");
+            }
+        }
+        let str_key: String = k.iter().map(|c| char::from_u32(*c).unwrap_or('?')).collect();
+        s.push_str(&format!("{:?}", str_key));
+    }
+    format!(
+        r#"// GENERATED FILE - DO NOT EDIT.
+//
+// Generated mechanically by planck-extractor (dif): the pinned 16,563-key
+// lookup sweep (44 sorted keys, the empty string, all 128 one-byte and all
+// 16,384 two-byte ASCII strings, the 6 delimiters). Shared by the kernel
+// oracle and the Rust test — one pinned enumeration on both sides.
+// CEP:FILE: extract/planck_operator/ground_truth/op_sweep_keys.rs
+// CEP:PROVENANCE: source math/crates/planck-operator-math/src/lib.rs (sha256 {sha}); extractor planck-extractor (dif); generated mechanically — hand edits are non-conforming (DR-8.2).
+// CEP:WHAT: The pinned sweep key list as a Rust const array of &str.
+// CEP:WHY: Both sides of the DIF share one pinned enumeration and key encoding.
+// CEP:STATUS: complete (generated)
+// CEP:FAILURE: A key edit fails the DIF loudly.
+// CEP:SECURITY: repository-trusted inputs.
+// CEP:ASSUMES: the sweep domain is pinned in DR-8.8 v2.9.
+// CEP:COST: compile-time only.
+// CEP:EVIDENCE: the DIF artifact records this file's sha256 per run.
+// CEP:FV-CLASS: FV-2 (generated sweep data)
+// CEP:FV-PROVER: Coq 8.20.1 kernel (vm_compute, over the same list)
+// CEP:FV-SCRIPT: tools/extractor (extractor dif)
+// CEP:FV-SORRY-COUNT: N/A
+// CEP:FV-REFINEMENT: complete pinned sweep; no sampling.
+// CEP:FV-AXIOMS: none
+
+pub const SWEEP_KEYS: [&str; {n}] = [
+    {body}
+];
+"#,
+        sha = ref_sha,
+        n = keys.len(),
+        body = s
     )
 }
 

@@ -6,6 +6,7 @@
 // CEP:ASSUMES: CEP&CC 0.4 field sets (standards.md §10.2, §54.7.1); .v files under rocq/.
 // CEP:COST: lint-time only.
 // CEP:EVIDENCE: this file; the lint run recorded in the DIF artifact chain.
+// CEP:SECURITY: repository-trusted inputs; no secrets; lint-time rejection only.
 // CEP:FV-CLASS: FV-2
 // CEP:FV-PROVER: N/A (tooling)
 // CEP:FV-SCRIPT: tools/extractor (extractor lint-cep)
@@ -62,12 +63,30 @@ pub fn lint(root: &Path) {
                 }
             }
         }
-        // Banned statement tokens (outside comments)
+        // Banned statement tokens (outside comments). VR-14(b): the sweep
+        // covers Parameter/Variable/Hypothesis/Conjecture/Variable(s)
+        // statement forms in addition to Admitted/Axiom/admit.
         let stripped = strip_comments(&text);
+        const BANNED_STATEMENTS: &[&str] = &[
+            "Admitted",
+            "Axiom ",
+            "Parameter ",
+            "Hypothesis ",
+            "Conjecture ",
+            "Variable ",
+            "Variables ",
+        ];
         for (i, line) in stripped.lines().enumerate() {
             let t = line.trim();
-            if t.starts_with("Admitted") || t.starts_with("Axiom ") || t == "admit." {
+            if t == "admit." {
                 failures.push(format!("{}:{}: banned proof token '{}'", rel, i + 1, t));
+                continue;
+            }
+            for b in BANNED_STATEMENTS {
+                if t.starts_with(b) {
+                    failures.push(format!("{}:{}: banned proof token '{}'", rel, i + 1, t));
+                    break;
+                }
             }
         }
     }

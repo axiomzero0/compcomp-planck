@@ -34,20 +34,29 @@ fn invalid_fixtures_are_actually_rejected() {
         );
         count += 1;
     }
-    assert_eq!(count, 7, "the invalid fixture inventory is pinned");
+    // 7 v1 grammar decisions + 6 v2 (DR-8.8) grammar decisions
+    assert_eq!(count, 13, "the invalid fixture inventory is pinned (v1 + v2 per DR-8.8)");
 }
 
 #[test]
 fn valid_fixture_is_actually_accepted() {
     let exe = env!("CARGO_BIN_EXE_planck-extractor");
-    let f = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/valid/minimal_row.v");
-    let out = Command::new(exe)
-        .args(["parse-check", f])
-        .output()
-        .expect("spawn");
-    assert!(
-        out.status.success(),
-        "valid fixture must parse: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/valid");
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir).expect("dir") {
+        let f = entry.expect("entry").path();
+        let out = Command::new(exe)
+            .args(["parse-check", f.to_str().expect("utf8")])
+            .output()
+            .expect("spawn");
+        assert!(
+            out.status.success(),
+            "valid fixture must parse: {} (stderr: {})",
+            f.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        count += 1;
+    }
+    // the v1 row fixture + the 6 v2 (DR-8.8) grammar decisions
+    assert_eq!(count, 7, "the valid fixture inventory is pinned (v1 + v2 per DR-8.8)");
 }

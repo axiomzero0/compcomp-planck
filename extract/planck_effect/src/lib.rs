@@ -11,19 +11,19 @@
 //! this file (structural erasure in the extractor lexer).
 // CEP:FILE: extract/planck_effect/src/lib.rs
 // CEP:PROVENANCE: source rocq/Effect/RowAlgebra.v (sha256 97dd6c25c8cfd0d9ff3c4868214506aa3a28d3ad6d986c128525eaedd7885399); extractor planck-extractor; generated mechanically — hand edits are non-conforming (CEP-DR-01 §8 DR-8.2), regenerate with `planck-extractor extract`.
-// CEP:WHAT: Mechanically extracted Rust of the rocq/Effect/RowAlgebra.v computational content (pinned Gallina subset): the row domain (2^8-element tuple-of-bool lattice), the eight accessors, join/meet/leq, and the pinned prelude mapping (orb -> x|y, andb -> x&y, implb -> if x { y } else { true }).
+// CEP:WHAT: Mechanically extracted Rust of the rocq/Effect/RowAlgebra.v computational content (pinned Gallina subset v1+v2 per DR-8.8): the row domain (2^8-element tuple-of-bool lattice), the eight accessors, join/meet/leq, and the pinned v1 prelude mapping (orb -> x|y, andb -> x&y, implb -> if x { y } else { true })
 // CEP:WHY: CEP-DR-01 DR-1.4 proof-to-Rust extraction; the standing standard bans hand-written compiler code — this file IS the extracted artifact and is never edited by hand.
 // CEP:STATUS: complete (generated; qualified by DIF against the Coq kernel over the complete finite domain)
 // CEP:FAILURE: Any disagreement with the kernel ground truth fails the DIF test; a hand edit is detected by planck-extractor check (regenerate + diff).
-// CEP:ASSUMES: the pinned Gallina subset; Rust 2021; the prelude mapping above (pinned in tools/extractor/src/emit.rs).
-// CEP:COST: runtime: O(1) per operation; build-time: cargo.
+// CEP:ASSUMES: the pinned Gallina subset (DR-8.1/DR-8.8); Rust 2021; the pinned prelude mappings (tools/extractor/src/emit.rs); core str Ord is byte-lexicographic.
+// CEP:COST: runtime: O(1)/O(log n) per operation; build-time: cargo.
 // CEP:EVIDENCE: source sha256 97dd6c25c8cfd0d9ff3c4868214506aa3a28d3ad6d986c128525eaedd7885399; ground truth extract/planck_effect/ground_truth/*_table.rs (generated Rust source, kernel vm_compute output, Coq 8.20.1); DIF artifacts under tools/fv/extract/artifacts/.
 // CEP:SECURITY: repository-trusted inputs; generated mechanically — hand edits are non-conforming.
 // CEP:FV-CLASS: FV-0-equivalent-by-DIF (function-level equivalence over the complete finite domain; the extraction step itself is FV-2 tooling)
 // CEP:FV-PROVER: Coq 8.20.1 kernel (oracle for the DIF ground truth)
 // CEP:FV-SCRIPT: tools/extractor (extractor dif; cargo test in extract/planck_effect)
 // CEP:FV-SORRY-COUNT: N/A (generated Rust; equivalence discharged by DIF, not admitted)
-// CEP:FV-REFINEMENT: function-level (definitional) equivalence with rocq/Effect/RowAlgebra.v over all 2^8 x 2^8 input pairs; the proofs stay in rocq/ (Prop erasure is structural).
+// CEP:FV-REFINEMENT: function-level (definitional) equivalence with rocq/Effect/RowAlgebra.v over the complete pinned domain (DR-8.8 v2.9); the proofs stay in rocq/ (Prop erasure is structural).
 // CEP:FV-AXIOMS: none
 
 #[inline]

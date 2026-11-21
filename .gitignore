@@ -13,3 +13,5 @@
 *.glob
 .*.aux
 target/
+rocq/.lia.cache
+*.long-type-*.txt

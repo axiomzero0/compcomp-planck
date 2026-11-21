@@ -76,6 +76,10 @@ const OBLIGATIONS: &[Obligation] = &[
     Obligation { name: "own_endborrow_borrowed_fr", expect: Expect::Theorem },
     Obligation { name: "own_endborrow_zero", expect: Expect::Theorem },
     Obligation { name: "own_table_cells", expect: Expect::Theorem },
+    // DO-1 extension pass (VR-14(d)): the charclass and operator domains
+    Obligation { name: "cc_ident_continue_union", expect: Expect::Theorem },
+    Obligation { name: "cc_whitespace_truth_agreement", expect: Expect::Theorem },
+    Obligation { name: "op_precedence_compare_agreement", expect: Expect::Theorem },
 ];
 
 /// CEP:WHAT: Leaks one per-run arena via MATP's own aligned region host (safe code; CEP-2 tooling).

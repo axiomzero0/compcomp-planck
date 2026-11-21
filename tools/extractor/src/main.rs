@@ -1,16 +1,17 @@
 // CEP:FILE: tools/extractor/src/main.rs
-// CEP:WHAT: Entry point of the Planck mechanical extractor: subcommands extract (generate the separated extract/ tree from kernel-checked .v sources), ground-truth (generate the DifGroundTruth.v kernel oracle), dif (orchestrate kernel-vs-Rust differential equivalence over the complete finite domain), check (regenerate and diff — enforces the hand-edit ban), lint-cep (mechanically enforce the CEP standard on the proof layer).
+// CEP:WHAT: Entry point of the Planck mechanical extractor: subcommands transcribe (regenerate rocq/Effect/OperatorTableData.v from the reference source, DR-8.8 v2.15), extract (generate the separated extract/ tree from kernel-checked .v sources), ground-truth (generate the DifGroundTruth.v kernel oracle), dif (orchestrate kernel-vs-Rust differential equivalence over the complete finite domains of all three foundation crates), check (regenerate and diff — enforces the hand-edit ban), lint-cep (mechanically enforce the CEP standard on the proof layer).
 // CEP:WHY: CEP-DR-01 DR-1.4 requires proof-to-Rust extraction; the standing user standard bans hand-written compiler code — every executable artifact must be mechanically extracted from the kernel-checked proofs, separated under extract/, and differentially verified against the Rocq kernel over full domains. The extractor is FV-2 tooling: deterministic, kernel-external, and qualified by EXH fixture tests plus the DIF discharge.
 // CEP:STATUS: complete
-// CEP:FAILURE: A parse or emission bug would produce Rust that disagrees with the kernel; that failure mode is discharged mechanically by the DIF harness (kernel vm_compute ground truth over the complete 2^8 x 2^8 domain) — any disagreement fails the build. A hand edit to extract/ is non-conforming and caught by the check subcommand.
-// CEP:ASSUMES: the pinned Gallina subset (Definitions only; right-nested tuple types and terms; explicit result types; no Fixpoint/Notation/Admitted/Axiom — rejects loudly otherwise); coqc on PATH for the dif subcommand (pinned Coq 8.20.1, CEP-DR-01 §6); cargo/rustc for building extract/.
+// CEP:FAILURE: A parse or emission bug would produce Rust that disagrees with the kernel; that failure mode is discharged mechanically by the DIF harness (kernel vm_compute ground truth over the complete domains, DR-8.8 v2.9) — any disagreement fails the build. A hand edit to extract/ is non-conforming and caught by the check subcommand.
+// CEP:SECURITY: repository-trusted inputs; no secrets.
+// CEP:ASSUMES: the pinned Gallina subset (DR-8.1/DR-8.8: Definitions, closed enums, the fuel shape, key literals; no recursion outside the fuel shape, no Notation/Admitted/Axiom — rejects loudly otherwise); coqc on PATH for the dif subcommand (pinned Coq 8.20.1, CEP-DR-01 §6); cargo/rustc for building extract/.
 // CEP:COST: build-time only; no runtime cost in the compiler itself.
-// CEP:EVIDENCE: this file; tests/fixtures (EXH over the grammar decision set); extract/planck_effect ground_truth + test runs recorded under tools/fv/extract/artifacts/.
+// CEP:EVIDENCE: this file; tests/fixtures (EXH over the grammar decision set); extract/planck_effect, extract/planck_charclass, extract/planck_operator ground truth + test runs recorded under tools/fv/extract/artifacts/.
 // CEP:FV-CLASS: FV-2 (deterministic extraction tooling; kernel-external; output qualified by DIF)
 // CEP:FV-PROVER: N/A (tooling — its outputs are checked by the Coq kernel oracle and cargo, not by a prover)
 // CEP:FV-SCRIPT: tools/extractor (cargo test; extractor dif)
 // CEP:FV-SORRY-COUNT: N/A (Rust tooling; no proof obligations skipped — all subset limits are hard rejects)
-// CEP:FV-REFINEMENT: the extracted Rust is definition-level (function-level) equal by DIF over the complete finite input domain; the proofs themselves stay in rocq/ and are never extracted (Prop erasure is structural: Lemma..Qed blocks are skipped by the lexer).
+// CEP:FV-REFINEMENT: the extracted Rust is definition-level (function-level) equal by DIF over the complete finite input domains; the proofs themselves stay in rocq/ and are never extracted (Prop erasure is structural: Lemma..Qed blocks are skipped by the lexer).
 // CEP:FV-AXIOMS: none
 
 pub mod cep;
@@ -18,11 +19,18 @@ pub mod dif;
 pub mod emit;
 pub mod gt;
 pub mod parse;
+pub mod transcribe;
 
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-pub const ROOT_FILES: &[&str] = &["rocq/Effect/RowAlgebra.v"];
+pub const ROOT_FILES: &[&str] = &[
+    "rocq/Effect/RowAlgebra.v",
+    "rocq/Effect/CharClass.v",
+    "rocq/Effect/OperatorEnums.v",
+    "rocq/Effect/OperatorTableData.v",
+    "rocq/Effect/OperatorTable.v",
+];
 
 fn repo_root() -> PathBuf {
     // The extractor runs from anywhere; locate the repo root by the sentinel file.
@@ -51,7 +59,11 @@ fn main() {
     let root = repo_root();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
     match cmd {
+        "transcribe" => {
+            transcribe::transcribe(&root);
+        }
         "extract" => {
+            transcribe::transcribe(&root);
             let mut all = Vec::new();
             for rel in ROOT_FILES {
                 let src = read_source(&root, rel);
@@ -83,10 +95,11 @@ fn main() {
             println!("parse-check: OK");
         }
         "help" | _ => {
-            println!("planck-extractor <extract|ground-truth|dif|check|lint-cep>");
+            println!("planck-extractor <transcribe|extract|ground-truth|dif|check|lint-cep>");
+            println!("  transcribe   regenerate rocq/Effect/OperatorTableData.v from the reference source (DR-8.8 v2.15)");
             println!("  extract      regenerate extract/ tree from rocq/ sources");
             println!("  ground-truth regenerate rocq/Effect/DifGroundTruth.v");
-            println!("  dif          kernel ground truth vs extracted Rust over the full domain");
+            println!("  dif          kernel ground truth vs extracted Rust over the full domains");
             println!("  check        regenerate and diff (hand-edit ban enforcement)");
             println!("  lint-cep     enforce the CEP standard on rocq/ proof files");
         }
@@ -123,7 +136,7 @@ mod fixture_tests {
         // reject each banned word's presence at Definition level by checking
         // the sweep logic (the actual process exit is covered by the dif
         // pipeline's loud failures; here we pin the list membership).
-        let banned = ["Admitted", "admit", "Axiom", "Fixpoint", "Notation"];
+        let banned = ["Admitted", "admit", "Axiom", "Parameter", "Hypothesis", "Conjecture", "CoFixpoint"];
         for w in banned {
             let src = format!("Definition {} : Type := (bool * (bool * bool))%type.\n", w);
             // The token sweep in parse_unit rejects these words ANYWHERE.
@@ -165,6 +178,13 @@ mod fixture_tests {
             "flat_tuple_type.v",
             "foreign_require.v",
             "missing_result_type.v",
+            // the v2 (DR-8.8) grammar decisions
+            "v2_arg_carrying_ctor.v",
+            "v2_ascii_out_of_range.v",
+            "v2_inexhaustive_match.v",
+            "v2_nat_out_of_domain.v",
+            "v2_unresolved_ident.v",
+            "v2_wildcard_arm.v",
         ];
         let mut got: Vec<String> = Vec::new();
         for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/invalid")).expect("dir") {
@@ -172,5 +192,61 @@ mod fixture_tests {
         }
         got.sort();
         assert_eq!(&got, EXPECTED);
+    }
+
+    // ------- v2 fixture EXH (the DR-8.8 extension decisions) -------
+
+    #[test]
+    fn v2_key_literal_lexes_and_parses() {
+        let src = "Require Import List.\nDefinition key : Type := (list nat).\nDefinition k1 : key := [33; 32; 40].\nDefinition k2 : key := [47].\n";
+        let u = crate::parse::parse_unit("v2k.v", src);
+        assert_eq!(u.definitions.len(), 3); // key alias + k1 + k2
+        assert_eq!(u.kind, crate::parse::UnitKind::Operator);
+    }
+
+    #[test]
+    fn v2_qualified_idents_are_single_tokens() {
+        let toks = toks("Definition f (b : byte) : bool := Nat.eqb b 9.");
+        assert!(toks.iter().any(|t| matches!(t, crate::parse::Tok::Ident(w) if w == "Nat.eqb")));
+        assert!(toks.iter().any(|t| matches!(t, crate::parse::Tok::NatLit(9))));
+    }
+
+    #[test]
+    fn v2_closed_enums_collect_in_declaration_order() {
+        let src = "Module PinnedEnums.\n  Inductive assoc : Type := Left | Right | None.\n  Inductive opid : Type := Assign | Add | Eq.\nEnd PinnedEnums.\nImport PinnedEnums.\n";
+        let lex = Lexer::lex(src).expect("lex");
+        let enums = crate::parse::collect_enums_pub(&lex);
+        assert_eq!(enums.len(), 2);
+        assert_eq!(enums[0].name, "assoc");
+        assert_eq!(enums[0].variants, vec!["Left", "Right", "None"]);
+        assert_eq!(enums[1].name, "opid");
+        assert_eq!(enums[1].variants, vec!["Assign", "Add", "Eq"]);
+    }
+
+    #[test]
+    fn v2_data_enum_ok_err_shape() {
+        let src = "Inductive lookup_result : Type := | Ok : oprow -> lookup_result | Err : lookup_error -> lookup_result.\n";
+        let lex = Lexer::lex(src).expect("lex");
+        let enums = crate::parse::collect_enums_pub(&lex);
+        assert_eq!(enums.len(), 1);
+        let pairs = enums[0].data_kind.as_ref().expect("data kind");
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0, "Ok");
+        assert_eq!(pairs[1].0, "Err");
+    }
+
+    #[test]
+    fn v2_charclass_unit_detects_byte_kind() {
+        let src = "Definition byte : Type := nat.\nDefinition TAB : byte := 9.\nDefinition is_ws (b : byte) : bool := Nat.eqb b TAB.\n";
+        let u = crate::parse::parse_unit("v2b.v", src);
+        assert_eq!(u.kind, crate::parse::UnitKind::Byte);
+    }
+
+    #[test]
+    fn v2_pinned_skip_names_are_not_checked_for_free_identifiers() {
+        // row_at's body uses nat matches with _ arms — proof-side, skipped.
+        let src = "Definition key : Type := (list nat).\nDefinition row_at (i : nat) : nat := match i with | 0 => 1 | _ => 2 end.\n";
+        let u = crate::parse::parse_unit("v2s.v", src);
+        assert_eq!(u.definitions.len(), 2);
     }
 }
